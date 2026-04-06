@@ -1,0 +1,41 @@
+{
+  "name": "priority-dev",
+  "version": "1.0.0",
+  "description": "Priority ERP development tools for Claude Code — skill, agents, and hooks for the Priority VSCode bridge",
+  "skills": "./skills/",
+  "agents": [
+    "./agents/builder.md",
+    "./agents/researcher.md",
+    "./agents/verifier.md"
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ensure-bridge.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check-credentials.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__priority-dev__.*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "If you haven't already loaded the priority-sdk skill in this conversation, invoke it now before proceeding with this Priority tool call. The skill contains SQLI language reference, trigger patterns, and development workflows essential for correct Priority code."
+          }
+        ]
+      }
+    ]
+  }
+}

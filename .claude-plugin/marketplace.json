@@ -1,0 +1,14 @@
+{
+  "name": "priority-dev-marketplace",
+  "owner": {
+    "name": "Priority Software"
+  },
+  "plugins": [
+    {
+      "name": "priority-dev",
+      "source": "./priority-dev",
+      "description": "Priority ERP development tools for Claude Code — skill, agents, hooks, and bridge extension",
+      "version": "1.0.0"
+    }
+  ]
+}
