@@ -345,6 +345,26 @@ When imported form columns come from the same table column, use **Join ID** and 
 
 **Important:** When creating custom multiple joins, use join ID and column ID **greater than 5**.
 
+#### Private Development on System Forms (IDCOLUMNE / IDJOINE)
+
+When adding custom columns (SOF_ prefix) to system forms that import from system tables (INVOICES, DOCTYPES, DOCUMENTS — internal table ID < 5):
+
+- **Cannot use TNAME/CNAME alone** — Priority rejects with "cannot add table with ID < 5"
+- **Must set IDCOLUMNE** to a non-zero value (e.g., 6) to create a named join instance
+- Both the join-establishing column AND the imported column must share the same IDCOLUMNE value
+- **Expression gotcha**: Expressions using `TABLE.COLUMN` (e.g., `DOCTYPES.DOCFLAG`) look for the default join instance (0). Columns at IDCOLUMNE=6 won't be found. **Workaround**: Use `:$.FORM_COLUMN` syntax to reference the hidden form column instead (e.g., `:$.SOF_DOCFLAG`)
+- `READONLY="M"` (mandatory) conflicts with `HIDEBOOL="Y"` (hidden) — don't combine them
+
+**Example — Adding DOCTYPES to a form where DOCUMENTS is already joined:**
+
+| Column | TNAME | CNAME | JTNAME | JCNAME | IDCOLUMNE | IDJOINE | Notes |
+|--------|-------|-------|--------|--------|-----------|---------|-------|
+| SOF_DOCTYPE | DOCUMENTS | TYPE | DOCTYPES | TYPE | 6 | 6 | Establishes join |
+| SOF_DOCFLAG | DOCTYPES | DOCFLAG | | | 6 | 0 | Uses join instance 6 |
+| SOF_IVFLAG | DOCTYPES | IVFLAG | | | 6 | 0 | Uses join instance 6 |
+
+Then in expressions: `:$.SOF_DOCFLAG = 'Y'` instead of `DOCTYPES.DOCFLAG = 'Y'`.
+
 #### Outer Joins
 
 Outer joins allow unmatched rows between base and join tables. Add a question mark (`?`) to:

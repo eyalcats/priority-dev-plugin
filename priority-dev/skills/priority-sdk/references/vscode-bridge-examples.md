@@ -68,6 +68,16 @@ POST .../EFORM(ENAME='SUBFORM',TYPE='F')/FCLMN_SUBFORM(NAME='KLINE')/FCLMNA_SUBF
 {"EXPR": ":$$.KLINE"}
 ```
 
+**Writing multi-line expressions** (EXPR is max 56 chars; continuation goes in FCLMNTEXT_SUBFORM):
+```
+PATCH .../FCLMN_SUBFORM(NAME='COL')/FCLMNA_SUBFORM
+{
+  "EXPR": "(:$.SOF_DOCFLAG = 'Y' ? DOCUMENTS.WEIGHT :",
+  "FCLMNTEXT_SUBFORM": { "TEXT": "(:$.SOF_IVFLAG = 'Y' ? INVOICES.WEIGHT : 0))" }
+}
+```
+Direct PATCH to FCLMNTEXT alone fails (record type mismatch). Must use **deep PATCH** on FCLMNA with embedded FCLMNTEXT.
+
 **Creating a column-level trigger** (e.g., POST-FIELD on TEXT column):
 ```
 POST .../EFORM(ENAME='FORM',TYPE='F')/FCLMN_SUBFORM(NAME='TEXT')/FORMCLTRIG_SUBFORM

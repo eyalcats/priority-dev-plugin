@@ -35,6 +35,19 @@ You create Priority ERP entities end-to-end from structural specs.
 9. **Compile** via `websdk_form_action` compound `compile` op
 10. **Add direct activations** via EFORM → FORMEXEC subform
 
+## Private Dev on System Forms (SOF_ columns on system tables)
+
+When adding custom columns (SOF_ prefix) that import from system tables (INVOICES, DOCTYPES, DOCUMENTS):
+- Set `IDCOLUMNE` to a non-zero value (e.g., 6) — IDCOLUMNE=0 triggers "table ID < 5" error
+- Both join-establishing and imported columns must share the same IDCOLUMNE value
+- Expressions: use `:$.SOF_COLNAME` instead of `TABLE.COLUMN` (non-default join instances aren't found by `TABLE.COLUMN`)
+- Expression EXPR field is max 56 chars — use deep PATCH with embedded FCLMNTEXT_SUBFORM for continuation:
+  ```
+  PATCH .../FCLMN_SUBFORM(NAME='COL')/FCLMNA_SUBFORM
+  { "EXPR": "line1", "FCLMNTEXT_SUBFORM": { "TEXT": "continuation" } }
+  ```
+- `READONLY:"M"` + `HIDEBOOL:"Y"` = error. Don't combine mandatory and hidden.
+
 ## Error Handling
 
 - Max 3 retries per step. After 3 failures on the same step, STOP and report the error.
