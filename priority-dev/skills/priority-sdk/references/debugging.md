@@ -677,8 +677,8 @@ If query results display incorrect characters (e.g., '1' or 'L') or are missing 
 Install the plugin (one-time):
 
 ```bash
-git clone https://github.com/eyalcats/priority-dev-plugin.git
-claude plugin add ./priority-dev-plugin
+claude plugin marketplace add eyalcats/priority-dev-plugin
+claude plugin install priority-dev
 ```
 
 **Requirements:**

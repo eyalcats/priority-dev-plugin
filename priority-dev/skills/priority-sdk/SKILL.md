@@ -30,8 +30,8 @@ Reference skill for writing, debugging, and maintaining code in the Priority ERP
 ### Install the Plugin
 
 ```bash
-git clone https://github.com/eyalcats/priority-dev-plugin.git
-claude plugin add ./priority-dev-plugin
+claude plugin marketplace add eyalcats/priority-dev-plugin
+claude plugin install priority-dev
 ```
 
 That's it. On first session start, the plugin will:

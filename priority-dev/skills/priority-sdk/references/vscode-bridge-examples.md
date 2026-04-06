@@ -2,7 +2,7 @@
 
 > **Note:** Basic tool descriptions and the development workflow are embedded in the MCP server (loaded automatically). This file covers advanced patterns, WebSDK operation details, and capture mechanics.
 
-> **Setup:** If the bridge isn't installed yet, run `git clone https://github.com/eyalcats/priority-dev-plugin.git && claude plugin add ./priority-dev-plugin`. See `SKILL.md` > Installation for details.
+> **Setup:** If the bridge isn't installed yet, run `claude plugin marketplace add eyalcats/priority-dev-plugin && claude plugin install priority-dev`. See `SKILL.md` > Installation for details.
 
 ## Architecture
 
