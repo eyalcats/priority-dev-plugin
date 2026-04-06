@@ -26,16 +26,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "mcp__priority-dev__.*",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "If you haven't already loaded the priority-sdk skill in this conversation, invoke it now before proceeding with this Priority tool call. The skill contains SQLI language reference, trigger patterns, and development workflows essential for correct Priority code."
-          }
-        ]
-      }
-    ]
+    "PreToolUse": []
   }
 }
