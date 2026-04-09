@@ -561,6 +561,44 @@ A processed report is a report whose data undergo processing prior to output. Em
 
 ---
 
+## HTMLDOC Report Sections
+
+When adding a report section to an HTMLDOC document procedure (e.g., invoice print):
+
+### Requirements Checklist
+All of these must be met or the section silently produces no output:
+
+1. **Create the report** (EREP) with columns, expressions, and HTML design
+2. **Add SQLI + report steps** to the procedure at correct POS positions
+3. **Wire parameter chain**: Report step needs OUTPUT ASCII param + IV INT param. INPUT step needs same ASCII param with PROGPARAMHTML grid positioning.
+4. **Add steps to print formats** — PROGFORMATS sub-subform lists included steps per format. ALL step types are gated (SQLI too). Without this, steps are silently skipped.
+5. **Set EXPRESSION=Y on filter column** — The report's key column (e.g., INVOICES.IV at POS 500) must have EXPRESSION=Y with REPCLMNSA expression = `INVOICES.IV`. Without this, the report returns ALL rows instead of the current record.
+6. **Compile the report** — EREP → Prepare (הכנה). Cannot compile reports via WebSDK.
+7. **Compile the procedure** — After SQLI changes.
+8. **Regenerate HTML template** — "Create HTML Page for Step" on the INPUT step after adding parameters.
+
+### Parameter Binding for Record Filtering
+For the HTMLCURSOR to pass the current record key to a report:
+- The report step's PROGPARAM must have an IV (INT) parameter
+- The report's REPCLMNS must have a column with CNAME=IV, TNAME=INVOICES, EXPRESSION=Y
+- The REPCLMNSA expression should be the direct column reference: `INVOICES.IV`
+- TYPE=INT in REPCLMNSA
+- Without EXPRESSION=Y, the parameter-to-column binding does NOT add a WHERE clause
+
+### PROGPARAMHTML Grid Positioning
+- Each output file parameter on the INPUT step has LINE/COL/TOCOL/WIDTH settings
+- Same LINE+COL as another parameter = overlap (section hidden behind the other)
+- Use unique LINE values for new sections
+- Template stored at `c:/priority/system/html/{PROCNAME}-{INPUTPOS}.htm`
+
+### Print Format Step Gating (PROGFORMATS)
+- Each format (e.g., "רגילה" NUM=-4) has a sub-subform listing included step POS values
+- **ALL step types are gated** — SQLI (ETYPE=C) steps too, not just report steps
+- New steps must be added to EVERY format that should run them
+- This is the #1 cause of "steps don't execute" for new HTMLDOC sections
+
+---
+
 ## Run Reports
 
 ### From a Program

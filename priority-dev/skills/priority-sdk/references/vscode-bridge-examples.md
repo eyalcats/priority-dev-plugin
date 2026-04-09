@@ -32,62 +32,65 @@ Commands like `displayTableColumns`, `selectAllRowsFromTable`, and `runSqliFile`
 
 ### WebSDK Form Operations (websdk_form_action)
 
-Form columns, joins, and read-only imported columns can be created via OData POST:
+Form columns, joins, and read-only imported columns are managed via WebSDK on EFORM:
 
 ```
-POST https://$PRIORITY_SERVER/odata/Priority/tabula.ini/$PRIORITY_COMPANY/EFORM(ENAME='FORM_NAME',TYPE='F')/FCLMN_SUBFORM
-Auth: Basic $PRIORITY_USER:$PRIORITY_PASS
-Content-Type: application/json
+# Add a base table column with join:
+filter EFORM(ENAME, "FORM_NAME") → getRows → setActiveRow(1)
+  → startSubForm(FCLMN) → newRow
+  → fieldUpdate(NAME, "COL") → fieldUpdate(CNAME, "COL")
+  → fieldUpdate(TNAME, "BASE_TABLE") → fieldUpdate(POS, "70")
+  → fieldUpdate(JTNAME, "JOIN_TABLE") → fieldUpdate(JCNAME, "JOIN_COL")
+  → saveRow
 
-# Base table column with join:
-{"NAME":"COL","CNAME":"COL","TNAME":"BASE_TABLE","POS":70,"JTNAME":"JOIN_TABLE","JCNAME":"JOIN_COL","IDCOLUMNE":"0","IDJOINE":"0"}
-
-# Imported read-only column:
-{"NAME":"COL","CNAME":"COL","TNAME":"JOIN_TABLE","POS":80,"READONLY":"R","IDCOLUMNE":"0","IDJOINE":"0"}
+# Add an imported read-only column:
+  → newRow → fieldUpdate(NAME, "COL") → fieldUpdate(CNAME, "COL")
+  → fieldUpdate(TNAME, "JOIN_TABLE") → fieldUpdate(POS, "80")
+  → fieldUpdate(READONLY, "R") → saveRow
 ```
 
-After adding columns, compile the form (open a Priority file in VSCode, then run `prepareForm`).
+After adding columns, compile the form via WebSDK compound `compile` operation.
 
-### OData Discovery: $expand=* on Form Columns
+### WebSDK Discovery: Subform Navigation on Form Columns
 
-To discover all sub-entities on a form column (expressions, column triggers, etc.), use `$expand=*`:
+To discover sub-entities on a form column (expressions, column triggers, etc.), navigate subforms via WebSDK:
 
 ```
-GET .../EFORM(ENAME='ORDERSTEXT',TYPE='F')/FCLMN_SUBFORM(NAME='ORD')?$expand=*
+filter EFORM(ENAME, "FORMNAME") → getRows → setActiveRow(1)
+  → startSubForm(FCLMN) → filter(NAME, "COL") → getRows → setActiveRow(1)
+  → startSubForm(FCLMNA) → getRows    # expression/condition
+  → endSubForm
+  → startSubForm(FORMCLTRIG) → getRows  # column-level triggers
 ```
 
-This reveals hidden sub-entities:
-- **FCLMNA_SUBFORM** — Form Column Extension (expression/condition text, e.g., `{"EXPR":":$$.ORD"}`)
-- **FORMCLTRIG_SUBFORM** — Column-level triggers (POST-FIELD, CHECK-FIELD, etc.)
-- **FCLMNHELP_SUBFORM** — Help topic
-- **FCLMNINTER_SUBFORM** — Column interfaces
+Sub-entities accessible via subform navigation:
+- **FCLMNA** — Form Column Extension (expression/condition text)
+- **FORMCLTRIG** — Column-level triggers (POST-FIELD, CHECK-FIELD, etc.)
+- **FCLMNHELP** — Help topic
+- **FCLMNINTER** — Column interfaces
 
 **Setting a column expression** (critical for subform parent-child linking):
 ```
-POST .../EFORM(ENAME='SUBFORM',TYPE='F')/FCLMN_SUBFORM(NAME='KLINE')/FCLMNA_SUBFORM
-{"EXPR": ":$$.KLINE"}
+filter EFORM(ENAME, "SUBFORM") → getRows → setActiveRow(1)
+  → startSubForm(FCLMN) → filter(NAME, "KLINE") → getRows → setActiveRow(1)
+  → startSubForm(FCLMNA) → newRow → fieldUpdate(EXPR, ":$$.KLINE") → saveRow
 ```
 
-**Writing multi-line expressions** (EXPR is max 56 chars; continuation goes in FCLMNTEXT_SUBFORM):
+**Writing multi-line expressions** (EXPR is max 56 chars; continuation goes in FCLMNTEXT):
 ```
-PATCH .../FCLMN_SUBFORM(NAME='COL')/FCLMNA_SUBFORM
-{
-  "EXPR": "(:$.SOF_DOCFLAG = 'Y' ? DOCUMENTS.WEIGHT :",
-  "FCLMNTEXT_SUBFORM": { "TEXT": "(:$.SOF_IVFLAG = 'Y' ? INVOICES.WEIGHT : 0))" }
-}
+# After navigating to FCLMNA and setting EXPR:
+  → startSubForm(FCLMNTEXT) → newRow → fieldUpdate(TEXT, "continuation line") → saveRow
 ```
-Direct PATCH to FCLMNTEXT alone fails (record type mismatch). Must use **deep PATCH** on FCLMNA with embedded FCLMNTEXT.
 
 **Creating a column-level trigger** (e.g., POST-FIELD on TEXT column):
 ```
-POST .../EFORM(ENAME='FORM',TYPE='F')/FCLMN_SUBFORM(NAME='TEXT')/FORMCLTRIG_SUBFORM
-{"TRIG": 11}
-
-PATCH .../FCLMN_SUBFORM(NAME='TEXT')/FORMCLTRIG_SUBFORM(TRIG=11)/FORMCLTRIGTEXT_SUBFORM
-{"TEXT": "SELECT :SCRLINE INTO :$.TEXTORD FROM DUMMY ;\n..."}
+filter EFORM(ENAME, "FORM") → getRows → setActiveRow(1)
+  → startSubForm(FCLMN) → filter(NAME, "TEXT") → getRows → setActiveRow(1)
+  → startSubForm(FORMCLTRIG) → newRow → fieldUpdate(TRIG, "11") → saveRow
 ```
+For trigger code, use `write_to_editor` instead of navigating FORMCLTRIGTEXT — it handles full multiline content.
 
-**Tip:** Always compare a working reference form using `$expand=*` before building a new form — differences are often in sub-entities you didn't know existed.
+**Tip:** Always compare a working reference form's subforms before building a new form — differences are often in sub-entities you didn't know existed.
 
 ---
 

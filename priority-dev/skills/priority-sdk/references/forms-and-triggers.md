@@ -351,19 +351,31 @@ When adding custom columns (SOF_ prefix) to system forms that import from system
 
 - **Cannot use TNAME/CNAME alone** — Priority rejects with "cannot add table with ID < 5"
 - **Must set IDCOLUMNE** to a non-zero value (e.g., 6) to create a named join instance
-- Both the join-establishing column AND the imported column must share the same IDCOLUMNE value
-- **Expression gotcha**: Expressions using `TABLE.COLUMN` (e.g., `DOCTYPES.DOCFLAG`) look for the default join instance (0). Columns at IDCOLUMNE=6 won't be found. **Workaround**: Use `:$.FORM_COLUMN` syntax to reference the hidden form column instead (e.g., `:$.SOF_DOCFLAG`)
+- **Imported columns DON'T work with IDCOLUMNE > 0** — even with correct IDJOINE, imported read-only columns (TNAME=joined_table, READONLY=R) return 0. Use expression columns instead.
+- **Expression syntax**: Use `TABLE.COLUMN` to reference any column regardless of IDCOLUMNE instance. Do NOT use `:$.COLUMN` — it scopes to the column's own IDCOLUMNE instance and won't find system columns (instance 0).
+- **Subform expressions**: Subforms don't inherit parent form join context. Use `:$$.PARENT_COLUMN` to reference parent form expression columns.
 - `READONLY="M"` (mandatory) conflicts with `HIDEBOOL="Y"` (hidden) — don't combine them
 
-**Example — Adding DOCTYPES to a form where DOCUMENTS is already joined:**
+**Pattern — Adding a join and calculated columns on a system form:**
 
-| Column | TNAME | CNAME | JTNAME | JCNAME | IDCOLUMNE | IDJOINE | Notes |
-|--------|-------|-------|--------|--------|-----------|---------|-------|
-| SOF_DOCTYPE | DOCUMENTS | TYPE | DOCTYPES | TYPE | 6 | 6 | Establishes join |
-| SOF_DOCFLAG | DOCTYPES | DOCFLAG | | | 6 | 0 | Uses join instance 6 |
-| SOF_IVFLAG | DOCTYPES | IVFLAG | | | 6 | 0 | Uses join instance 6 |
+1. **Join column** (base table, establishes the join):
 
-Then in expressions: `:$.SOF_DOCFLAG = 'Y'` instead of `DOCTYPES.DOCFLAG = 'Y'`.
+| Column | TNAME | CNAME | JTNAME | JCNAME | IDCOLUMNE | Notes |
+|--------|-------|-------|--------|--------|-----------|-------|
+| SOF_JOINKEY | BASETABLE | JOINKEY | JOINTABLE | JOINKEY | 6 | Establishes join, HIDEBOOL=Y |
+
+2. **Expression columns** (reference joined data via TABLE.COLUMN):
+
+| Column | EXPRESSION | WIDTH | IDCOLUMNE | Expression |
+|--------|------------|-------|-----------|------------|
+| SOF_JOINEDVAL | Y | 16 | 6 | `JOINTABLE.COLUMN` |
+| SOF_CALC | Y | 16 | 6 | `BASETABLE.FIELD * JOINTABLE.COLUMN` |
+
+3. **Subform expression** (references parent's expression column):
+
+| Column | EXPRESSION | WIDTH | IDCOLUMNE | Expression |
+|--------|------------|-------|-----------|------------|
+| SOF_SUBCALC | Y | 16 | 6 | `SUBTABLE.FIELD * :$$.SOF_JOINEDVAL` |
 
 #### Outer Joins
 
@@ -653,7 +665,7 @@ UNIQUE (KLINE, TEXTLINE);
 
 Replace `prefix_PARENT` with your entity name. KLINE links to the parent form's autounique key.
 
-**2. Create the form** via EFORM (OData POST or Form Generator UI):
+**2. Create the form** via EFORM (WebSDK or Form Generator UI):
 
 | Property | Value | Notes |
 |----------|-------|-------|
@@ -680,10 +692,9 @@ In the **Form Column Extension** (`FCLMNA_SUBFORM`) of the parent-link column (K
 EXPR = :$$.KLINE
 ```
 
-Via OData:
+Via WebSDK:
 ```
-POST .../EFORM(ENAME='prefix_PARENTTEXT',TYPE='F')/FCLMN_SUBFORM(NAME='KLINE')/FCLMNA_SUBFORM
-{"EXPR": ":$$.KLINE"}
+filter EFORM(ENAME) → setActiveRow → startSubForm(FCLMN) → filter(NAME, "KLINE") → setActiveRow → startSubForm(FCLMNA) → newRow → fieldUpdate(EXPR, ":$$.KLINE") → saveRow
 ```
 
 Replace `KLINE` with whatever the parent form's autounique column is called. Without this expression, `EXPRESSION=Y` alone does nothing — the subform won't link to the parent and won't render as HTML.
@@ -709,7 +720,7 @@ LABEL 1;
 
 Always use `:$$.parentkey` (parent form reference), not `:$.parentkey` (current form).
 
-**6. Link as subform** on the parent form via OData POST to FLINK_SUBFORM or Form Generator UI.
+**6. Link as subform** on the parent form via WebSDK (`startSubForm(FLINK) → newRow → fieldUpdate(ENAME) → saveRow`) or Form Generator UI.
 
 **7. Compile** both the text form and the parent form.
 

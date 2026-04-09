@@ -48,6 +48,32 @@ When adding custom columns (SOF_ prefix) that import from system tables (INVOICE
   ```
 - `READONLY:"M"` + `HIDEBOOL:"Y"` = error. Don't combine mandatory and hidden.
 
+## HTMLDOC Report Sections
+
+When adding report sections to HTMLDOC document procedures:
+
+### Step Inclusion in Print Formats (CRITICAL)
+- PROGFORMATS on EPROG lists available print formats per procedure
+- Each format has a sub-subform listing included step POS values
+- **ALL step types are gated** — SQLI steps too, not just reports
+- New steps MUST be added to every relevant format or they silently skip
+- This is the #1 cause of "my new steps don't execute"
+
+### Report Column Filter Binding
+- The report's key column (e.g., INVOICES.IV) must have EXPRESSION=Y
+- REPCLMNSA expression = the column reference (e.g., `INVOICES.IV`), TYPE=INT
+- Without EXPRESSION=Y, the report returns ALL rows instead of the filtered record
+
+### Parameter Chain
+1. Report step PROGPARAM: IV (INT) + output file (ASCII, EXPR="OUTPUT")
+2. INPUT step PROGPARAM: same ASCII param name
+3. PROGPARAMHTML on INPUT param: LINE/COL/TOCOL/WIDTH (unique LINE to avoid overlap)
+4. Run "Create HTML Page for Step" on INPUT after changes
+
+### Compilation
+- Report: Must compile via EREP → Prepare (cannot compile via WebSDK)
+- Procedure: Compile via prepareProc after SQLI changes
+
 ## Error Handling
 
 - Max 3 retries per step. After 3 failures on the same step, STOP and report the error.

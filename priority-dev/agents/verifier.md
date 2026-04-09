@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Tests created Priority entities via WebSDK/OData to verify they work correctly.
+description: Tests created Priority entities via WebSDK to verify they work correctly.
 tools:
   - mcp__priority-dev__websdk_form_action
   - mcp__priority-dev__run_windbi_command

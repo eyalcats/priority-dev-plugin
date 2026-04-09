@@ -67,6 +67,44 @@ You study existing Priority ERP forms to understand their structure and produce 
 7. Open FORMEXEC subform — list direct activations
 8. Use run_windbi_command to get base table structure
 
+## Procedure & Report Research
+
+### Procedure Steps (EPROG/PROG)
+```
+filter EPROG(ENAME, "PROCNAME") → getRows → setActiveRow(1)
+  → startSubForm(PROG) → getRows(fromRow:1, count:80)
+```
+Returns: POS, ENAME (step entity), ETYPE (C=SQLI, R=Report, B=Built-in), TITLE
+
+### PROGPARAM (step parameters)
+```
+PROG → filter(POS, "XX") → setActiveRow(1) → startSubForm(PROGPARAM) → getRows
+```
+
+### PROGTEXT (step query code — SQLI/INPUT/CHOOSE only)
+```
+PROG → filter(POS, "XX") → setActiveRow(1) → startSubForm(PROGTEXT) → getRows
+```
+Note: GOTO/built-in steps return error "הכנס שאילתה רק בשלב של תוכנית חיצונית"
+
+### Print Formats (PROGFORMATS)
+```
+EPROG → startSubForm(PROGFORMATS) → getRows
+```
+Each format has NUM (e.g., -4 for "רגילה") and a sub-subform listing included step POS values.
+
+### Report Columns (EREP/REPCLMNS)
+```
+filter EREP(ENAME, "REPORTNAME") → getRows → setActiveRow(1)
+  → startSubForm(REPCLMNS) → getRows(fromRow:1, count:50)
+```
+For expressions: setActiveRow on column → startSubForm(REPCLMNSA) → getRows
+
+### Key Gotchas
+- `fromRow: 1` needed on first getRows for REPCLMNS (may return empty without it)
+- WebSDK getRows omits empty fields — missing EXPR means it's null, not a bug
+- PROGTEXT not available for built-in steps (GOTO, HTMLCURSOR, INPUT)
+
 ## Target Forms
 
 Study these lightweight forms first:

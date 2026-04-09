@@ -384,7 +384,7 @@ The `EXEC` table stores direct activations (Actions) linked to forms. Key column
 - **TYPE** — entity type: `F` (form), `P` (procedure), `M` (menu)
 - **TITLE** — display title of the activation
 
-To query or add direct activations via OData, use the **FORMEXEC** subform on the **EFORM** form.
+To query or add direct activations via WebSDK, use `startSubForm(FORMEXEC)` on EFORM after filtering to the parent form.
 
 **Important:** `TAKEDIRECTACT` in a revision requires a companion `TAKESINGLEENT` for the activated entity (`sonEntity`). Without it, INSTITLE fails with "Error linking" because the target entity definition is missing from the shell.
 
@@ -691,7 +691,7 @@ No separate credential configuration is needed if the Priority Dev Tools extensi
 
 The integration uses the **priority-dev** MCP server (bridge running inside VSCode), a companion VSCode extension (`priority-claude-bridge`) that exposes tools for reading, writing, and inspecting Priority code directly through the editor.
 
-For OData operations (querying forms, running procedures, CRUD) the **priority-gateway** MCP server is available separately but not required for core code development.
+For form operations (querying forms, running procedures, CRUD) use `websdk_form_action` from the priority-dev bridge. The **priority-gateway** MCP server is available separately but not required for core code development.
 
 ### Bridge Tools (priority-dev)
 
@@ -833,7 +833,7 @@ Commands with "Yes" in Input Dialog use a clipboard-paste auto-fill mechanism (6
 | priority-dev unreachable | Bridge extension not running | Reload VSCode; verify the bridge health endpoint responds |
 | "No procedure data" in log | Active editor was not a Priority file | Bridge auto-focuses now; ensure a .pq file is open |
 
-**Gateway alternatives for unreliable bridge commands:** When dump commands fail to capture output (webview limitation), use the WebSDK Gateway tools `dump-entity` and `read-code` instead — they return structured data directly via OData.
+**Gateway alternatives for unreliable bridge commands:** When dump commands fail to capture output (webview limitation), use the WebSDK Gateway tools `dump-entity` and `read-code` instead — they return structured data directly.
 
 See `references/vscode-bridge-examples.md` for detailed tool usage examples.
 
