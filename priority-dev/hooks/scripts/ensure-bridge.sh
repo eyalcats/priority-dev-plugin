@@ -3,7 +3,7 @@
 # If not, install from the bundled VSIX — without launching VSCode windows.
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$(dirname "$(dirname "$0")")")}"
-VSIX="$PLUGIN_ROOT/bridge/priority-claude-bridge-1.4.0.vsix"
+VSIX="$PLUGIN_ROOT/bridge/priority-claude-bridge-1.5.0.vsix"
 
 # Check multiple possible extension directories (avoid `code` CLI which opens windows)
 for EXT_DIR in \
