@@ -54,12 +54,38 @@ claude plugin update priority-dev@priority-dev-marketplace
 
 On the next Claude Code session, `ensure-bridge.sh` detects the newer VSIX shipped with the plugin and auto-upgrades the installed extension. Reload the window once to activate. No manual file dialog needed.
 
+> **Important: `claude plugin marketplace add` does NOT refresh an existing marketplace.** If you already added `eyalcats/priority-dev-plugin` before, running `marketplace add` again is a no-op — Claude Code says *"already declared in user settings"* and keeps the stale local clone. `claude plugin install` will then pull the old version from that stale clone. **Always use `claude plugin update`** for upgrades, or do a full marketplace reset (see below).
+
+### Full marketplace reset (when updates don't pull the latest)
+
+If `claude plugin update` doesn't bring you to the latest version — usually because the local marketplace clone is pinned and the update mechanism isn't re-fetching — wipe the local clone and re-add:
+
+```powershell
+# PowerShell
+claude plugin marketplace remove priority-dev-marketplace
+Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\plugins\marketplaces\priority-dev-marketplace" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\plugins\cache\priority-dev-marketplace" -ErrorAction SilentlyContinue
+claude plugin marketplace add eyalcats/priority-dev-plugin
+claude plugin install priority-dev
+```
+
+```bash
+# macOS / Linux
+claude plugin marketplace remove priority-dev-marketplace
+rm -rf ~/.claude/plugins/marketplaces/priority-dev-marketplace
+rm -rf ~/.claude/plugins/cache/priority-dev-marketplace
+claude plugin marketplace add eyalcats/priority-dev-plugin
+claude plugin install priority-dev
+```
+
+Then start a fresh `claude` session in VSCode and reload the window when the bridge auto-install finishes.
+
 ## Manual install (fallback)
 
-If the auto-install hook doesn't run (e.g., `code` CLI not on PATH, or you're not using Claude Code yet):
+If the auto-install hook doesn't run (extraction tools missing, locked directory, etc.), install the VSIX manually:
 
 1. `Ctrl+Shift+P` → `Extensions: Install from VSIX…`
-2. Navigate to `%USERPROFILE%\.claude\plugins\priority-dev\bridge\` and pick the only `.vsix` file in there
+2. Navigate to `%USERPROFILE%\.claude\plugins\cache\priority-dev-marketplace\priority-dev\<version>\bridge\` and pick the only `.vsix` file in there (replace `<version>` with the latest installed — e.g., `1.6.4`)
 3. Reload VSCode
 
 ## Verify
