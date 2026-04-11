@@ -79,9 +79,54 @@ fi
 TARGET_DIR="$EXT_DIR/$TARGET_NAME"
 mkdir -p "$TARGET_DIR"
 
-# tar with --strip-components=1 extracts only the extension/ folder contents
-# (a VSIX is a zip with [Content_Types].xml, extension.vsixmanifest, and extension/ at root)
-if tar -xf "$VSIX" -C "$TARGET_DIR" --strip-components=1 extension 2>/dev/null; then
+# Helper — register (or re-register) the extension in VSCode's extensions.json
+# so VSCode actually loads it on next reload. File extraction alone is NOT
+# enough: VSCode does not auto-discover new extension folders, only loads
+# what's listed in extensions.json. Without this step, upgrades leave a
+# stale entry pointing at a deleted folder and VSCode reports "unable to
+# read package.json" on startup.
+register_extension() {
+  local helper="$(dirname "$0")/update-extensions-json.js"
+  if ! command -v node >/dev/null 2>&1; then
+    echo "warning: node not on PATH, skipping extensions.json registration — VSCode may not load the new version" >&2
+    return 0
+  fi
+  if [ ! -f "$helper" ]; then
+    echo "warning: update-extensions-json.js not found at $helper, skipping registration" >&2
+    return 0
+  fi
+  node "$helper" "$EXT_DIR" "$TARGET_NAME" "$VSIX_VERSION" >&2 || {
+    echo "warning: extensions.json update failed — VSCode may need the 'Extensions: Install from VSIX' fallback" >&2
+    return 0
+  }
+}
+
+EXTRACTED=0
+
+# Path 1: tar with --strip-components=1 extracts only the extension/ folder
+# contents (a VSIX is a zip with [Content_Types].xml, extension.vsixmanifest,
+# and extension/ at root). Works on Windows 10+ native tar (libarchive) and
+# macOS tar. Fails on msys GNU tar (Git Bash default) which does not handle
+# zip archives.
+if [ "$EXTRACTED" -eq 0 ] && tar -xf "$VSIX" -C "$TARGET_DIR" --strip-components=1 extension 2>/dev/null; then
+  EXTRACTED=1
+fi
+
+# Path 2: unzip fallback (present in Git Bash, many Linux distros)
+if [ "$EXTRACTED" -eq 0 ] && command -v unzip >/dev/null 2>&1; then
+  rm -rf "$TARGET_DIR" 2>/dev/null
+  TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t pcb)
+  if [ -n "$TEMP_DIR" ] && unzip -q "$VSIX" -d "$TEMP_DIR" 2>/dev/null; then
+    mkdir -p "$TARGET_DIR"
+    if cp -r "$TEMP_DIR/extension/." "$TARGET_DIR/" 2>/dev/null; then
+      EXTRACTED=1
+    fi
+    rm -rf "$TEMP_DIR"
+  fi
+fi
+
+if [ "$EXTRACTED" -eq 1 ]; then
+  register_extension
   if [ -z "$EXISTING" ]; then
     echo '{"message": "Priority Claude Bridge '"$VSIX_VERSION"' installed. Reload VSCode window (Ctrl+Shift+P -> Developer: Reload Window) to activate, then click the status bar item to set up licensing."}'
   else
@@ -90,22 +135,8 @@ if tar -xf "$VSIX" -C "$TARGET_DIR" --strip-components=1 extension 2>/dev/null; 
   exit 0
 fi
 
-# --- 5. tar failed — cleanup and report ---
+# --- 5. All extraction methods failed — cleanup and report ---
 rm -rf "$TARGET_DIR" 2>/dev/null
-
-# Fallback: try unzip (present in Git Bash, some Linux distros)
-if command -v unzip >/dev/null 2>&1; then
-  TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t pcb)
-  if [ -n "$TEMP_DIR" ] && unzip -q "$VSIX" -d "$TEMP_DIR" 2>/dev/null; then
-    mkdir -p "$TARGET_DIR"
-    cp -r "$TEMP_DIR/extension/." "$TARGET_DIR/" 2>/dev/null && {
-      rm -rf "$TEMP_DIR"
-      echo '{"message": "Priority Claude Bridge '"$VSIX_VERSION"' installed via unzip fallback. Reload VSCode window to activate."}'
-      exit 0
-    }
-    rm -rf "$TEMP_DIR"
-  fi
-fi
 
 # All auto-install methods failed
 echo '{"message": "Priority Claude Bridge auto-install failed (tar and unzip both unavailable or errored). Install manually via Ctrl+Shift+P -> Extensions: Install from VSIX -> '"$VSIX"'"}'
