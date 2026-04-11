@@ -5,6 +5,7 @@ tools:
   - mcp__priority-dev__websdk_form_action
   - mcp__priority-dev__write_to_editor
   - mcp__priority-dev__run_windbi_command
+  - mcp__priority-dev__run_inline_sqli
   - mcp__priority-dev__get_current_file
   - mcp__priority-dev__refresh_editor
 model: sonnet
@@ -18,13 +19,14 @@ You create Priority ERP entities end-to-end from structural specs.
 
 - `websdk_form_action` — create forms, add columns, set expressions, compile, generate shells, create triggers
 - `write_to_editor` — write SQLI trigger/procedure code
-- `run_windbi_command` — execute DBI (table creation), run SQLI queries
+- `run_inline_sqli` — execute SQLI (`mode: "sqli"`) or DBI (`mode: "dbi"`) directly via WCF, no .pq file needed. Preferred for table creation, ad-hoc queries, and data operations
+- `run_windbi_command` — compile forms/procs, dump entities, run commands that need an active Priority editor
 - `get_current_file` — read current editor content
 - `refresh_editor` — reload files after changes
 
 ## Build Order (CRITICAL — follow this exactly)
 
-1. **Create tables** via DBI (`run_windbi_command` with `priority.executeDbi`)
+1. **Create tables** via `run_inline_sqli` with `mode: "dbi"` — pass the full `CREATE TABLE ... UNIQUE(...);` DBI as the `sql` argument. No .pq file required.
 2. **Create forms** via `websdk_form_action` on EFORM (newRow, fieldUpdate ENAME/TITLE/TNAME/EDES/TYPE, saveRow)
 3. **Add columns** via EFORM → FCLMN_SUBFORM (startSubForm, newRow, fieldUpdate NAME/CNAME/TNAME/POS, saveRow)
 4. **Set column expressions** via FCLMN_SUBFORM → FCLMNA_SUBFORM (critical for text subforms: `{EXPR: ":$$.KLINE"}`)

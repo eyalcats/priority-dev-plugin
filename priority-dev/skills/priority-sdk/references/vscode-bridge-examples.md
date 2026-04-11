@@ -106,7 +106,8 @@ For trigger code, use `write_to_editor` instead of navigating FORMCLTRIGTEXT —
 | Optimize | optimizeSql, optimizeForm, optimizeReport | Yes | Yes (some) | 60-70% |
 | **Compile** | **compile_form** (preferred) | No | No | **95%+ (WCF CmdSqliOpt)** |
 | Compile (fallback) | prepareForm, prepareProc | Yes | No | 10-20% (errors not captured) |
-| Execute | runSqliFile, executeDbi, createSqliFile, executeSqliInAllCompanies | Yes (most) | Yes (some) | 40-80% |
+| **Execute (preferred)** | **`run_inline_sqli` mode="sqli"/"dbi"** | No | No | **95%+ (direct WCF)** |
+| Execute (legacy) | runSqliFile, executeDbi, createSqliFile, executeSqliInAllCompanies | Yes (most) | Yes (some) | 40-80% |
 | Scaffold | createFormTrigger, deleteFormTrigger, createFormColumnTrigger, deleteFormColumnTrigger, createProcedureStep, deleteProcedureStep | Yes | Yes (trigger/step) | 40-50% |
 | Utility | searchInExplorer, refreshExplorer, showLogs, showFileLogs | No | Yes (some) | N/A |
 
@@ -165,6 +166,53 @@ All form metadata operations work via WebSDK with `filter` + subform navigation:
 - FORMEXEC: set `ETYPE` first ("P"/"F"/"R"), then `RUN` (entity name)
 - FTRIG: field name is `TRIGNAME` (not `NAME`)
 - Trigger code in FTRIGTEXT is stored one line per row (68-char RCHAR limit). For writing, use `write_to_editor` instead
+- **Column-level trigger code (FORMCLTRIG → FORMCLTRIGTEXT) has known quirks.** See the "Column trigger code" section below — `write_to_editor` returns TRIGGER_NOT_FOUND for column triggers, and WebSDK `newRow` on FORMCLTRIGTEXT may silently append duplicate rows when the trigger already has lines. Use the DBI fallback.
+
+#### Column trigger code (FORMCLTRIGTEXT) — DBI fallback
+
+`write_to_editor` only handles form-level triggers (PRE-FORM, POST-UPDATE, etc.). Column-level triggers (CHECK-FIELD, POST-FIELD, CHOOSE-FIELD on a specific column) return `TRIGGER_NOT_FOUND`. For those, the first-choice path is WebSDK:
+
+```
+EFORM → FCLMN(column) → FORMCLTRIG → newRow(TRIGNAME) → saveRow
+       → FORMCLTRIGTEXT → newRow → fieldUpdate(TEXT, "line 1") → saveRow ...
+```
+
+**But WebSDK has silent-failure modes on FORMCLTRIGTEXT:**
+- `newRow` APPENDS, doesn't replace. Rewriting a trigger that already has lines produces duplicates — Priority concatenates them at runtime, parses as one broken SQL statement, and silently skips the trigger. Form still compiles clean because column trigger code is not parsed until runtime.
+- `getRows` on a deep subform may return `{}` even when rows exist, making verification via WebSDK unreliable.
+
+**Reliable fallback: write trigger lines directly via DBI** to the `FORMCLTRIGTEXT` table:
+
+```sql
+/* 1. Find the form ID (check via EFORM dump or this query) */
+SELECT FORM, TRIG, NAME, TEXTLINE, TEXT FROM FORMCLTRIGTEXT
+WHERE NAME = 'MY_COLUMN' ORDER BY TRIG, TEXTLINE FORMAT;
+
+/* 2. Wipe any existing lines (avoids the append bug) */
+DELETE FROM FORMCLTRIGTEXT
+WHERE FORM = <form_id> AND NAME = 'MY_COLUMN' AND TRIG = <trig_id>;
+
+/* 3. Insert fresh lines (one row per 68-char line) */
+INSERT INTO FORMCLTRIGTEXT (FORM, NAME, TRIG, TEXTLINE, TEXTORD, TEXT)
+VALUES (<form_id>, 'MY_COLUMN', <trig_id>, 1, 1, 'SELECT ... ');
+/* ...one INSERT per line... */
+```
+
+The `FORMCLTRIG` parent row (type declaration) still needs to exist — create it via WebSDK first (`FCLMN → FORMCLTRIG → newRow → fieldUpdate(TRIGNAME) → saveRow`). Only the TEXT lines go through DBI.
+
+**TRIG value mapping** (trigger type IDs in FORMCLTRIG/FORMCLTRIGTEXT, reverse-engineered 2026-04-10):
+
+| TRIG | Trigger type |
+|------|--------------|
+| -1 | CHOOSE-FIELD |
+| -2 | SEARCH-DES-FIELD |
+| -3 | SEARCH-NAME-FIELD |
+| -5 | SEARCH-ALL-FIELD |
+| 10 | CHECK-FIELD |
+| 11 | POST-FIELD |
+| 12 | (tooltip / help text) |
+
+`FORMCLTRIGTEXT.NAME` is the **column name** (e.g., `FTIP_FCOUNTRY`), not the trigger name. `FORMCLTRIGTEXT.TRIG` is the trigger type from the table above. Primary key is `(FORM, NAME, TRIG, TEXTLINE)`.
 
 #### Code Writing — Use write_to_editor
 
@@ -238,13 +286,18 @@ Downloads, converts UTF-16 to UTF-8, forces `.sh` extension, saves to temp direc
 | Create table | `CREATE TABLE name col1 (TYPE, WIDTH, 'Title') ... AUTOUNIQUE(col) UNIQUE(col);` |
 | Add column | `FOR TABLE X INSERT col (type, width, 'title');` |
 
-Execution: write `.pq` file → open in VSCode → `run_windbi_command("priority.executeDbi")`
+Execution (preferred): `run_inline_sqli({ sql: "<DBI code>", mode: "dbi" })` — no .pq file, no editor, direct WCF call. Returns output immediately.
+
+Legacy path: write `.pq` file → open in VSCode → `run_windbi_command("priority.executeDbi")`.
 
 #### Procedure Creation — DBI INSERT into EXEC
 
-No WebSDK form exists for creating procedures. Use DBI:
-```sql
-INSERT INTO EXEC (ENAME, TITLE, TYPE, EDES) VALUES ('CON_MYPROC', 'My Procedure', 'P', 'CON');
+No WebSDK form exists for creating procedures. Use DBI via `run_inline_sqli`:
+```js
+run_inline_sqli({
+  sql: "INSERT INTO EXEC (ENAME, TITLE, TYPE, EDES) VALUES ('CON_MYPROC', 'My Procedure', 'P', 'CON');",
+  mode: "dbi"
+})
 ```
 Then add steps via `run_windbi_command("priority.createProcedureStep")` with the procedure file open in VSCode.
 
@@ -260,26 +313,24 @@ Then add steps via `run_windbi_command("priority.createProcedureStep")` with the
 
 ### DBI vs SQLI: When to Use Which
 
-| Operation | Engine | VSCode Command | MCP Command |
-|-----------|--------|---------------|-------------|
-| Data queries (SELECT, INSERT, UPDATE, DELETE) | SQLI | Execute > Run SQLI | `priority.runSqliFile` |
-| Schema changes (CREATE TABLE, column/key modifications) | DBI | Execute > Execute DBI | `priority.executeDbi` |
+| Operation | Engine | `run_inline_sqli` mode | Legacy MCP Command |
+|-----------|--------|----------------------|--------------------|
+| Data queries (SELECT, INSERT, UPDATE, DELETE) | SQLI | `mode: "sqli"` (default) | `priority.runSqliFile` |
+| Schema changes (CREATE TABLE, column/key modifications) | DBI | `mode: "dbi"` | `priority.executeDbi` |
 
-Both require the code to be in a `.pq` file open in VSCode. Running DBI as SQLI (or vice versa) will produce parse errors.
+Running DBI as SQLI (or vice versa) produces parse errors — always pick the right engine. `run_inline_sqli` uses direct WCF and returns output immediately with no active editor required.
 
 ### DBI Execution
 
-To execute DBI statements via `priority.executeDbi`:
+**Preferred:** `run_inline_sqli({ sql: "<dbi code>", mode: "dbi" })` — direct WCF `CmdDbi`, returns output.
+
+**Legacy (only needed for interactive debugging or createSqliFile flows):**
 
 1. The active editor must contain a `.pq` file with DBI content
-2. The command shows an input dialog (auto-filled via clipboard mechanism)
-3. Output goes to the WINDBI webview panel (not capturable)
+2. Run `run_windbi_command("priority.executeDbi")` — shows an input dialog auto-filled via clipboard
+3. Output renders in the WINDBI webview panel (not capturable)
 
-**Recommended workflow:**
-1. Create a temp SQLI file: `run_windbi_command("priority.createSqliFile")`
-2. Write DBI content to the editor with `write_to_editor`
-3. Run: `run_windbi_command("priority.executeDbi")`
-4. Ask the user to check the WINDBI panel for results
+> **`runSqliFile` / `executeDbi` gotcha:** these commands execute the **currently active VSCode editor tab** regardless of the `entityName` argument passed to the MCP tool. `entityName` is only for logging. If you Write() or Edit() a `.pq` file after VSCode already opened it, VSCode may not reload it from disk and the stale content runs. Workarounds: (a) prefer `run_inline_sqli` which has no active-editor dependency; (b) use a fresh filename for each write so VSCode opens the new file; (c) ask the user to revert/reload the file.
 
 ### Shell Generation Notes
 

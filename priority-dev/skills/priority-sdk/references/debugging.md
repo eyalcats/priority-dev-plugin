@@ -751,10 +751,12 @@ For form operations (querying forms, running procedures, CRUD) use `websdk_form_
 
 **Execute:**
 
+> **Preferred:** `run_inline_sqli({ sql, mode: "sqli" | "dbi" })` — direct WCF call, no .pq file, no editor, returns output. Use this for all ad-hoc queries and schema changes. The WINDBI commands below are the legacy path and only needed for interactive workflows.
+
 | Command | What it does |
 |---------|-------------|
-| `priority.runSqliFile` | Run SQLI file (requires .pq file active) |
-| `priority.executeDbi` | Execute DBI |
+| `priority.runSqliFile` | Run SQLI file (requires .pq file active) — legacy, prefer `run_inline_sqli` |
+| `priority.executeDbi` | Execute DBI — legacy, prefer `run_inline_sqli` with `mode:"dbi"` |
 | `priority.createSqliFile` | Create a new temporary SQLI file |
 | `priority.executeSqliInAllCompanies` | Run SQLI in all companies |
 
@@ -816,7 +818,8 @@ WINDBI command results render in the **PRIORITY WINDBI webview panel** in VSCode
 | Search / Display | findStringInAllForms, displayTableColumns, etc. | Yes | 80-90% |
 | Dump | dumpForm, dumpProcedure, dumpTable, etc. | Yes | 30-50% (webview) |
 | Scaffold | createFormTrigger, createProcedureStep, etc. | Yes | 40-50% |
-| Execute | runSqliFile, executeDbi, createSqliFile | Yes (some) | 40-80% |
+| **Execute (preferred)** | **`run_inline_sqli` mode="sqli"/"dbi"** | No | **95%+ (direct WCF)** |
+| Execute (legacy) | runSqliFile, executeDbi, createSqliFile | Yes (some) | 40-80% |
 
 Commands with "Yes" in Input Dialog use a clipboard-paste auto-fill mechanism (600ms delay, 20s timeout). See `references/vscode-bridge-examples.md` for full details.
 
@@ -829,9 +832,12 @@ Commands with "Yes" in Input Dialog use a clipboard-paste auto-fill mechanism (6
 | `write_to_editor` returns `saved: false` | Focus was stolen during save | File is modified in editor; press Ctrl+S manually |
 | `run_windbi_command` returns `COMMAND_TIMEOUT` | Input dialog not answered in 20s | Ensure entityName is provided; the clipboard-paste auto-fill may have missed the dialog due to timing. Retry with a Priority file active in VSCode. |
 | `run_windbi_command` output is null or log-only | WINDBI renders in webview (not capturable) | Check PRIORITY WINDBI panel visually; or use Gateway `dump-entity` tool for structured output |
-| `executeDbi` fails or times out | Requires active `.pq` file with DBI content | Create a temp SQLI file, write DBI content, then run executeDbi |
+| `run_windbi_command` returns `NO_PRIORITY_FILE_OPEN` | FORM/PROC command fired with no matching file loaded | Open the target form/procedure from the Environments Explorer sidebar, then retry. v1.6+ pre-checks this to avoid silent "No X data" failures. |
+| `run_windbi_command` returns `MISSING_ENTITY_NAME` | TABLE/REPORT command called without entityName | Pass `entityName` for dumpTable / displayTableColumns / dumpReport etc. |
+| `run_windbi_command` returns `MISSING_SEARCH_STRING` | findStringInAllForms called without input | Bridge cannot fill the input box non-interactively. Use `run_inline_sqli` to query CODEREF / form-dump tables directly. |
+| `executeDbi` fails or times out | Requires active `.pq` file with DBI content | **Use `run_inline_sqli({ sql, mode: "dbi" })` instead** — no .pq file needed, direct WCF call. |
 | priority-dev unreachable | Bridge extension not running | Reload VSCode; verify the bridge health endpoint responds |
-| "No procedure data" in log | Active editor was not a Priority file | Bridge auto-focuses now; ensure a .pq file is open |
+| "No procedure data" in log (v1.5 and earlier) | Active editor was not a Priority file | Fixed in v1.6 — bridge now returns structured `NO_PRIORITY_FILE_OPEN` instead of silent failure. |
 
 **Gateway alternatives for unreliable bridge commands:** When dump commands fail to capture output (webview limitation), use the WebSDK Gateway tools `dump-entity` and `read-code` instead — they return structured data directly.
 

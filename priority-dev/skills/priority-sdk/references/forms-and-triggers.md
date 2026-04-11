@@ -351,8 +351,9 @@ When adding custom columns (SOF_ prefix) to system forms that import from system
 
 - **Cannot use TNAME/CNAME alone** — Priority rejects with "cannot add table with ID < 5"
 - **Must set IDCOLUMNE** to a non-zero value (e.g., 6) to create a named join instance
-- **Imported columns DON'T work with IDCOLUMNE > 0** — even with correct IDJOINE, imported read-only columns (TNAME=joined_table, READONLY=R) return 0. Use expression columns instead.
-- **Expression syntax**: Use `TABLE.COLUMN` to reference any column regardless of IDCOLUMNE instance. Do NOT use `:$.COLUMN` — it scopes to the column's own IDCOLUMNE instance and won't find system columns (instance 0).
+- **Imported columns DO work with IDCOLUMNE > 0** *if* the base column carries the matching `JTNAME`/`JCNAME` at the same `IDJOINE` value. A prior debugging session concluded they "always return 0" — that was a misdiagnosis: the base column had no join defined, so there was nothing to ride on. With a real base-column join, imported columns at instance 6 populate correctly. Verified 2026-04-10 on CINVOICES.FTIP_COUNTRYNAME (IDCOLUMNE=6, IDJOINE=6) riding on CINVOICES.FTIP_FCOUNTRY (HIDEBOOL=Y, JTNAME=COUNTRIES, JCNAME=COUNTRY, IDJOINE=6).
+- **Expression syntax** (when you need a computed value across instances): Use `TABLE.COLUMN` to reference any column regardless of IDCOLUMNE instance. Do NOT use `:$.COLUMN` — it scopes to the column's own IDCOLUMNE instance and won't find system columns (instance 0).
+- **Form expressions are scalar-only.** The form column expression parser (`FCLMNA.EXPR` + `FCLMNTEXT` continuation) supports column refs, arithmetic, and string concatenation — NOT general SQL. Scalar subqueries like `(SELECT COUNTRYNAME FROM COUNTRIES WHERE COUNTRY = INVOICES.FTIP_FCOUNTRY)` fail to compile with `parse error at or near symbol SELECT`. If you need data from a foreign table, use a proper join (see the picker pattern below), not a subquery expression.
 - **Subform expressions**: Subforms don't inherit parent form join context. Use `:$$.PARENT_COLUMN` to reference parent form expression columns.
 - `READONLY="M"` (mandatory) conflicts with `HIDEBOOL="Y"` (hidden) — don't combine them
 
@@ -376,6 +377,29 @@ When adding custom columns (SOF_ prefix) to system forms that import from system
 | Column | EXPRESSION | WIDTH | IDCOLUMNE | Expression |
 |--------|------------|-------|-----------|------------|
 | SOF_SUBCALC | Y | 16 | 6 | `SUBTABLE.FIELD * :$$.SOF_JOINEDVAL` |
+
+#### Foreign-Key Pickers: the join IS the picker
+
+**The search popup / dropdown on a foreign-key field comes from the JOIN, not from a CHOOSE-FIELD trigger.** Custom CHOOSE-FIELD triggers customize the query an existing picker runs — they do NOT create the UI affordance. A plain INT column with no join has no popup button in the web client, no matter what triggers you attach. This confuses new Priority developers repeatedly and wastes hours.
+
+**The canonical pattern** (used by CUSTOMERS.COUNTRY, CINVOICES.TAXCODE, CINVOICES.DCODE, and every other foreign-key field in the system):
+
+| Role | Example | TYPE | HIDEBOOL | TNAME | CNAME | JTNAME | JCNAME | IDCOLUMNE | IDJOINE |
+|------|---------|------|----------|-------|-------|--------|--------|-----------|---------|
+| **Base column** (ID storage) | `COUNTRY` | INT | **Y** | (base table) | `COUNTRY` | `COUNTRIES` | `COUNTRY` | 0 | 0 |
+| **Display column** (user-facing, picker) | `COUNTRYNAME` | CHAR | (blank) | **`COUNTRIES`** | `COUNTRYNAME` | (blank) | (blank) | 0 | 0 |
+
+The user interacts with the CHAR display column. Priority's web client shows a search popup because the column is imported from a joined table. On selection, Priority reverse-looks-up the foreign key by the name and fills the hidden INT base column via the join.
+
+**IDJOINE instance selection:**
+- **Form has no existing join to the foreign table** → use `IDJOINE = 0` on both rows (matches the CUSTOMERS.COUNTRY/COUNTRYNAME pattern exactly).
+- **Form already has the foreign table joined via a different path** (e.g., CINVOICES already joins COUNTRIES transitively through CUSTOMERS) → use a new instance like `IDJOINE = 6`. The imported column's `IDCOLUMNE` MUST match the base column's `IDJOINE`.
+
+**Triggers on hidden base columns.** POST-FIELD on the hidden INT column does NOT fire (user never interacts with it). Put POST-FIELD logic on the visible CHAR display column. Inside the trigger, `:$.THE_INT_COLUMN` still works because the join resolves the code before POST-FIELD runs.
+
+**Do NOT:**
+- Put a plain INT column visible and attach a custom CHOOSE-FIELD trigger. No UI affordance will render and the trigger will never fire. This is the single most common mistake on Priority forms.
+- Try a scalar subquery as the display column's expression. Form expressions are scalar-only (see above).
 
 #### Outer Joins
 
@@ -649,6 +673,9 @@ LABEL 99;
 ### Creating Text Subforms Manually
 
 When the **Create Text Form** generator cannot be used (e.g., parent form has no custom prefix), create the text subform manually:
+
+> **Text subforms are exempt from the "form generator UI required" rule.** For regular data-entry forms, creating a brand-new form via raw EFORM `newRow` fails `FORMPREP` with "אין מסך בשם זה" — you must use the Define Form generator. Text subforms (`EDES='LOG'`) do NOT have this restriction. You can create them entirely via WebSDK / OData and they compile clean on first try. This is because `EDES='LOG'` flags the form as a log/text form, which Priority initializes without the extra steps the Form Generator runs for normal forms. Verified 2026-04-10.
+
 
 **1. Create the text table** (DBI):
 
@@ -1044,8 +1071,19 @@ ORDER BY 1;
 - Optional third argument = sort order
 - Both arguments must be CHAR type (use `ITOA` to convert numbers)
 - First argument is stored in `:PAR4` system variable for use by other triggers
+- **The query MUST include a WHERE clause.** Save fails with `שאילתת CHOOSE חייבת לכלול תנאי WHERE`. For "all rows" use a tautology like `WHERE COUNTRY > 0`.
+- **CHOOSE-FIELD does NOT create a picker UI.** It customizes the query an existing picker runs. A plain column with no join and no inherent picker will never invoke CHOOSE-FIELD regardless of the trigger code — see "Foreign-Key Pickers: the join IS the picker" above.
 
 **Numeric sort fix:** Use `ITOA(m, 4)` to pad numbers with leading zeros for correct sort order.
+
+**INT target column example** (both CHOOSE args must be CHAR, but the target column can be INT — Priority converts the returned CHAR back to INT via ATOI):
+
+```sql
+/* CHOOSE-FIELD on an INT country-code column */
+SELECT COUNTRYNAME, ITOA(COUNTRY, 13)
+FROM COUNTRIES WHERE COUNTRY > 0
+ORDER BY 1;
+```
 
 **Constant values from messages:**
 ```sql
