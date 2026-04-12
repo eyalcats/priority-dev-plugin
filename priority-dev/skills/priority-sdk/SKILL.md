@@ -8,55 +8,22 @@ description: >-
   "generate a document", "use WINHTML", "write DBI syntax",
   "create a table in Priority", "load data with INTERFACE",
   "use DBLOAD", "write Priority SQL", "create a BPM",
-  "write a dashboard procedure", or mentions Priority ERP development,
-  form triggers, SQLI, Priority procedures, or Priority SDK.
+  "write a dashboard procedure", "use WebSDK", "manage form columns",
+  "add form column via WebSDK", "write column trigger code",
+  "create a subform", "write an expression column",
+  "set up a foreign-key picker", "websdk_form_action",
+  or mentions Priority ERP development, form triggers, SQLI,
+  Priority procedures, or Priority SDK.
   Provides comprehensive reference for the Priority ERP SDK including
   SQL dialect, forms, triggers, reports, procedures, interfaces,
-  documents, web services, and debugging tools.
-version: 1.0.0
+  documents, web services, WebSDK operations, and debugging tools.
 ---
 
 # Priority SDK Development Guide
 
 Reference skill for writing, debugging, and maintaining code in the Priority ERP system. Covers the full SDK: SQL dialect, forms, triggers, reports, procedures, interfaces, documents, integrations, and debugging.
 
-## Installation
-
-### Prerequisites
-
-- **VSCode** with the [Priority Dev Tools extension](https://marketplace.visualstudio.com/items?itemName=PrioritySoftware.priority-vscode) installed and at least one environment configured
-- **Claude Code** CLI installed
-
-### Install the Plugin
-
-```bash
-claude plugin marketplace add eyalcats/priority-dev-plugin
-claude plugin install priority-dev
-```
-
-That's it. On first session start, the plugin will:
-1. Auto-install the Priority Claude Bridge VSCode extension (if not already installed)
-2. Configure the MCP connection to the bridge
-3. Check for credentials — if the Priority Dev Tools extension has an environment configured, no additional setup is needed
-
-### Verify
-
-1. Reload VSCode (`Ctrl+Shift+P` > `Developer: Reload Window`)
-2. Open a Priority file from the Environments Explorer
-3. Start Claude Code and ask: `List the Priority bridge tools available`
-
-### Manual Credential Setup (only if Priority Dev Tools extension is not installed)
-
-Add to VSCode settings (`Ctrl+,`):
-```json
-{
-  "priorityClaudeBridge.serverUrl": "https://your-server",
-  "priorityClaudeBridge.company": "your-company",
-  "priorityClaudeBridge.username": "your-user",
-  "priorityClaudeBridge.password": "your-password",
-  "priorityClaudeBridge.tabulaini": "tabula.ini"
-}
-```
+For installation instructions, see `references/installation.md`.
 
 ## Core Concepts
 
@@ -78,6 +45,7 @@ All custom entities must start with a **four-letter prefix** (e.g., `ACME_ORDERS
 
 ### Critical Rules
 
+- **Entity names must be <= 20 characters** — alphanumeric and underscore only, must begin with a letter. Violations cause silent failures.
 - Never INSERT/UPDATE data in standard tables directly. Use interfaces (INTERFACE program).
 - Every LINK/UNLINK operation must be followed by a success check.
 - Use `ENTMESSAGE` for non-ASCII text in code (e.g., Hebrew messages).
@@ -106,7 +74,7 @@ Form triggers are the primary way to add business logic. The execution order:
 11. **POST-DELETE** - After record deletion
 12. **POST-FORM** - Runs when form closes
 
-Trigger naming: `prefix_TRIGGERTYPE` for form-level, or use the column name for column-level triggers.
+Trigger naming: Form-level triggers use `prefix_TRIGGERTYPE` (e.g., `ACME_POST-INSERT`). Column-level triggers are declared against the column name — the trigger type (CHECK-FIELD, POST-FIELD, etc.) is specified separately, not embedded in the name.
 
 ### Writing Procedures
 
@@ -157,7 +125,8 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 
 | File | Contents |
 |------|----------|
-| **`references/forms-and-triggers.md`** | Form creation, all column types, all trigger types with examples, ERRMSG/WRNMSG, MAILMSG, INCLUDE/buffers |
+| **`references/forms.md`** | Form creation, all column types, joins, sub-level forms, conditions, text forms, SQL variables |
+| **`references/triggers.md`** | All trigger types with examples, ERRMSG/WRNMSG, MAILMSG, INCLUDE/buffers, form preparation |
 | **`references/reports.md`** | Report creation, columns, sorting/grouping, calculated columns, CSS styling, report types |
 | **`references/procedures.md`** | Procedure steps, parameters, user input methods, step queries, flow control, PRINT messages |
 | **`references/documents.md`** | Document generation, WINHTML program (direct/quick syntax), all parameters, print formats |
@@ -173,6 +142,12 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 | **`references/websdk-cookbook.md`** | **WebSDK tested patterns**: operation property reference, common mistakes, copy-paste recipes (read/hide/add columns, expressions, triggers, compile), SQLI metadata queries (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT), EFORM alias→real table mapping |
 | **`references/web-cloud-dashboards.md`** | Priority Web differences, Cloud (system/sync), Dashboards/Priority Lite, BPM creation, Web SDK (CORS, connection, reports, search, procedures, encoding, performance) |
 
+### Setup
+
+| File | Contents |
+|------|----------|
+| **`references/installation.md`** | Prerequisites, plugin install, credential setup, verification |
+
 ### Code Examples
 
 | File | Contents |
@@ -187,10 +162,10 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 ## Quick Reference: Common Tasks
 
 ### Validate a field value
-Read `references/forms-and-triggers.md` > CHECK-FIELD section, then see `examples/trigger-examples.sql`.
+Read `references/triggers.md` > CHECK-FIELD section, then see `examples/trigger-examples.sql`.
 
 ### Create a new form with triggers
-Read `references/forms-and-triggers.md` for form setup, then trigger creation. Use `examples/trigger-examples.sql` for patterns.
+Read `references/forms.md` for form setup, then `references/triggers.md` for trigger creation. Use `examples/trigger-examples.sql` for patterns.
 
 ### Write a procedure with user input
 Read `references/procedures.md` > User Input section, then see `examples/procedure-examples.sql`.
@@ -237,9 +212,9 @@ To find specific content in reference files, search for these patterns:
 | System variables | `SQL.` or `:$` | `references/sql-core.md` |
 | Date functions | `ATOD\|DTOA\|DAYS\|ADDDATE` | `references/sql-core.md` |
 | String functions | `STRCAT\|SUBSTR\|STRIND\|ITOA` | `references/sql-core.md` |
-| Trigger types | `CHECK-FIELD\|POST-FIELD\|PRE-INSERT` | `references/forms-and-triggers.md` |
-| ERRMSG/WRNMSG | `ERRMSG\|WRNMSG` | `references/forms-and-triggers.md` |
-| MAILMSG | `MAILMSG` | `references/forms-and-triggers.md` |
+| Trigger types | `CHECK-FIELD\|POST-FIELD\|PRE-INSERT` | `references/triggers.md` |
+| ERRMSG/WRNMSG | `ERRMSG\|WRNMSG` | `references/triggers.md` |
+| MAILMSG | `MAILMSG` | `references/triggers.md` |
 | WINHTML | `WINHTML\|-d\|-dQ` | `references/documents.md` |
 | Interface params | `EXECUTE INTERFACE` | `references/interfaces.md` |
 | GENERALLOAD | `GENERALLOAD` | `references/interfaces.md` |

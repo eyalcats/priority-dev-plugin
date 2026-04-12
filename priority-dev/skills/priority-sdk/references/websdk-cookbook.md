@@ -1,13 +1,13 @@
 # WebSDK Cookbook — Tested Patterns
 
-> Copy-paste-ready operation chains for `websdk_form_action`. Verified against a live Priority server (2026-04-12).
+> Copy-paste-ready operation chains for `websdk_form_action`. Verified against a live Priority server. Last updated 2026-04-12.
 
 ## What Works vs What Doesn't
 
 | Operation | Works? | Notes |
 |-----------|--------|-------|
 | `filter` → `setActiveRow` → `startSubForm` | **Yes** | Subform opens correctly |
-| `fieldUpdate` → `saveRow` on subforms | **Partial** | Returns "ok" but some fields on EFORM (e.g., HIDEBOOL) don't persist — verify via SQLI after saving |
+| `fieldUpdate` → `saveRow` on subforms | **Yes** | Works on EFORM subforms including HIDEBOOL |
 | `newRow` → `fieldUpdate` → `saveRow` | **Yes** | Creating new rows in subforms works |
 | `getRows` on root form | **Yes** | Returns row data (must filter first) |
 | `getRows` on business subforms | **Yes** | Works on regular subforms (e.g., UPGNOTES, ORDERITEMS) with `getRows(1)` |
@@ -19,8 +19,7 @@
 - **Single record read/write:** WebSDK — `filter` first, then `getRows(1)` or `fieldUpdate`/`saveRow`
 - **Multi-record reads with subforms:** OData with `$expand` (one call vs N×open/read/close SDK round-trips)
 - **EFORM metadata reads (columns, triggers):** SQLI on system tables (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT) — EFORM's FCLMN subform returns `{}` via getRows
-- **EFORM metadata writes (add column, set expression):** WebSDK works, but verify via SQLI after saving
-- **HIDEBOOL changes:** SQLI UPDATE on `FORMCLMNS.HIDE` directly — WebSDK fieldUpdate doesn't persist
+- **EFORM metadata writes (add column, set expression, hide):** WebSDK works — fieldUpdate + saveRow persists
 
 ### VSIX installation note
 
@@ -86,6 +85,7 @@ WebSDK uses bare subform names. The `_SUBFORM` suffix is an OData URL convention
 | `getRows` on subform without `setActiveRow` first | TypeError: Cannot read 'data' of undefined | Always `setActiveRow(1)` before `getRows` on subforms |
 | `getRows` with `fromRow: 0` | TypeError crash on subforms | Always use `fromRow: 1` (1-based). Old `count` param was actually passed as `fromRow` — `count: 200` meant "start from row 200", not "get 200 rows" |
 | `getRows` on EFORM's FCLMN subform | Returns `{}` — EFORM metadata subforms don't return data via getRows | **Use SQLI on FORMCLMNS instead** (see SQLI Metadata Queries below) |
+| `filter(ENAME)` on FORMPREPERRS | "Invalid filter" | FORMPREPERRS has no ENAME column — just use `getRows` with no filter (shows last compile's errors) |
 | Querying table `FORMCOLUMNS` or `FORMCOL` | "not a legal table name" | The real table is `FORMCLMNS` |
 | Using `HIDEBOOL` in SQLI queries | "Unresolved identifier" | Real column is `HIDE` (HIDEBOOL is the EFORM view alias) |
 | Using `IDCOLUMNE` in SQLI queries | "Unresolved identifier" | Real column is `IDCOLUMN` |
@@ -112,9 +112,28 @@ FORMAT;
 
 Note: `HIDE` = "H" means hidden (EFORM shows this as `HIDEBOOL=Y`).
 
-### Hide a column (set HIDE=H)
+### Hide a column
 
-**Use SQLI** — WebSDK `fieldUpdate(HIDEBOOL, "Y")` returns "ok" but does NOT persist the change.
+**WebSDK** — `fieldUpdate(HIDEBOOL, "Y")` + `saveRow` persists correctly (verified 2026-04-12):
+
+```json
+{
+  "form": "EFORM",
+  "operations": [
+    {"op": "filter", "field": "ENAME", "value": "MY_FORM"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "startSubForm", "name": "FCLMN"},
+    {"op": "filter", "field": "NAME", "value": "COL_NAME"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "fieldUpdate", "field": "HIDEBOOL", "value": "Y"},
+    {"op": "saveRow"}
+  ]
+}
+```
+
+To unhide: `"value": ""`. For bulk hide, repeat the filter+setActiveRow+fieldUpdate+saveRow block per column.
+
+**Alternative (SQLI)** — useful for hiding multiple columns in one shot:
 
 ```sql
 UPDATE FORMCLMNS SET HIDE = 'H'
@@ -123,7 +142,7 @@ WHERE FORM = (
 AND NAME IN ('COL1', 'COL2');
 ```
 
-To unhide: `SET HIDE = ''`. Then recompile the form.
+To unhide: `SET HIDE = ''`.
 
 **Always recompile after hiding columns:**
 ```json
@@ -290,12 +309,12 @@ No `form` parameter needed — `compile` is a compound operation. Returns `statu
 
 ### Read compile errors after compile
 
+FORMPREPERRS has no filterable columns — it auto-shows errors from the last compile. Just `getRows`:
+
 ```json
 {
   "form": "FORMPREPERRS",
   "operations": [
-    {"op": "filter", "field": "ENAME", "value": "MY_FORM"},
-    {"op": "setActiveRow", "row": 1},
     {"op": "getRows"}
   ]
 }
