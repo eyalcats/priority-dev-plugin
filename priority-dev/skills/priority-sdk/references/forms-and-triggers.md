@@ -713,7 +713,7 @@ Replace `prefix_PARENT` with your entity name. KLINE links to the parent form's 
 
 **4. Set the parent-link expression** (CRITICAL — this enables both CRUD and HTML rendering):
 
-In the **Form Column Extension** (`FCLMNA_SUBFORM`) of the parent-link column (KLINE), set the expression to reference the parent form's key:
+In the **Form Column Extension** (`FCLMNA` subform) of the parent-link column (KLINE), set the expression to reference the parent form's key:
 
 ```
 EXPR = :$$.KLINE
@@ -752,7 +752,7 @@ Always use `:$$.parentkey` (parent form reference), not `:$.parentkey` (current 
 **7. Compile** both the text form and the parent form.
 
 **Key rules:**
-- **`FCLMNA_SUBFORM.EXPR`** is the critical setting — it enables both parent-child data linking AND HTML editor rendering
+- **`FCLMNA.EXPR`** is the critical setting — it enables both parent-child data linking AND HTML editor rendering
 - `EDES = 'LOG'` is required — controls text form detection by Priority's web client
 - The Create Text Form generator (`TEXTFORM`) only works when the parent form has a custom prefix
 - All trigger references to the parent key must use `:$$` (parent form), not `:$` (current form)
