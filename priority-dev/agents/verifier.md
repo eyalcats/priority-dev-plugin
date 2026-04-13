@@ -22,10 +22,10 @@ For each entity, verify:
 
 ### 1. Structure Verification
 - [ ] Form exists in EFORM (filter by ENAME)
-- [ ] All expected columns exist in FCLMN_SUBFORM
-- [ ] Column expressions set correctly in FCLMNA_SUBFORM
-- [ ] Triggers exist in FTRIG_SUBFORM
-- [ ] Subform links exist in FLINK_SUBFORM
+- [ ] All expected columns exist (startSubForm FCLMN — no `_SUBFORM` suffix)
+- [ ] Column expressions set correctly (startSubForm FCLMNA)
+- [ ] Triggers exist (startSubForm FTRIG)
+- [ ] Subform links exist (startSubForm FLINK)
 - [ ] Direct activations exist in FORMEXEC (if applicable)
 
 ### 2. CRUD Test

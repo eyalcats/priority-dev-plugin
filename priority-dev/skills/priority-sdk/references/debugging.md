@@ -344,6 +344,38 @@ Server Buffered=0
 | TAKEWORDTMPL | Addition/revision of a Word template |
 | TAKEHELP | Addition/revision of online help |
 
+### Choosing the Right UPGCODE (Decision Guide)
+
+**Use the most specific UPGCODE for each change. `TAKESINGLEENT` is a last resort — it captures the entire entity, which is overkill for small changes and dangerous on system forms.**
+
+| What changed | UPGCODE | entityType | Extra fields |
+|-------------|---------|------------|--------------|
+| Created a brand-new custom entity (form/proc/report) | `TAKESINGLEENT` | F/P/R | |
+| Modified a trigger on a form | `TAKETRIG` | F | `trigger` = trigger name |
+| Added/changed a column on a form | `TAKEFORMCOL` | F | `trigger` = column name |
+| Added/changed a subform link | `TAKEFORMLINK` | F | `sonEntity`, `sonType` |
+| Added/changed a direct activation | `TAKEDIRECTACT` | F | `sonEntity`, `sonType` (auto-adds companion `TAKESINGLEENT` for sonEntity) |
+| Added/changed a procedure step | `TAKEPROCSTEP` | P | `pos` = step position |
+| Added/changed a report column | `TAKEREPCOL` | R | `trigger` = column name |
+| Added/changed a procedure message | `TAKEPROCMSG` | P | |
+| Added/changed a trigger message | `TAKETRIGMSG` | F | |
+| Changed entity title/attributes only | `TAKEENTHEADER` | F/P/R | |
+| Schema change (CREATE TABLE, column adds) | `DBI` | | Write DBI in UPGNOTESTEXT |
+| Deleted a trigger | `DELTRIG` | F | `trigger` = trigger name |
+| Deleted a column | `DELFORMCOL` | F | `trigger` = column name |
+| Deleted a subform link | `DELFORMLINK` | F | `sonEntity`, `sonType` |
+| Deleted a direct activation | `DELDIRECTACT` | F | |
+| Deleted a procedure step | `DELPROCSTEP` | P | `pos` |
+| Deleted a report column | `DELREPCOL` | R | |
+
+**Common mistakes:**
+- Using `TAKESINGLEENT` when only a trigger changed → captures the entire form including all columns, joins, expressions. On system forms this pulls system columns that may not exist on the target.
+- Using `TAKESINGLEENT` on a system form → **always** use `TAKEFORMCOL`/`TAKETRIG`/`TAKEFORMLINK` for specific changes to system forms.
+- Forgetting `TAKEDIRECTACT` needs a companion `TAKESINGLEENT` for the activated entity.
+- Forgetting DBI for custom columns on system tables (bypass change tracking).
+
+**Rule of thumb:** If you can describe the change in one line ("changed trigger X", "added column Y"), there's a specific UPGCODE for it. Only use `TAKESINGLEENT` when you created a brand-new entity from scratch.
+
 ### Programmatic Revision via WebSDK
 
 When automating shell generation via the WebSDK (e.g., from a VSCode extension):
@@ -434,6 +466,25 @@ FORMAT;
 - Do not wait more than a working day; prepare upgrades at end of each day.
 - Order matters: reports before procedures, interfaces before procedures, DBI before TAKEFORMCOL.
 - Never prepare the same upgrade twice; create a new revision instead.
+- **TAKESINGLEENT on system forms pulls ALL columns** — use TAKEFORMCOL for specific columns added to system forms to avoid "Missing column" errors on clients with different Priority versions.
+- **Custom columns on system tables** added via manual DBI bypass change tracking — TAKEUPGRADE won't auto-generate DBI for them. Add a manual UPGCODE="DBI" entry to UPGNOTES with UPGNOTESTEXT containing the DBI (no `EXEC` prefix, ASCII titles). See "Adding Manual DBI to UPGNOTES" below.
+
+### Adding Manual DBI to UPGNOTES (for untracked table changes)
+
+When a custom column was added to a system table via manual DBI (not through the Table Generator), it won't be included in the upgrade shell automatically. To include it:
+
+1. Open UPGRADES form, navigate to the revision
+2. In UPGNOTES subform, add a new row: `UPGCODE=DBI`, `BOUND=Y`, `ORD=1`
+3. Open UPGNOTESTEXT subform on that DBI row and write the DBI lines (one line per row, 68-char max):
+   ```
+   FOR TABLE <tablename>
+   INSERT <colname> (<TYPE>, <WIDTH>, '<ASCII title>');
+   ```
+4. **No `EXEC` prefix** — the shell wraps it in `DBI << \EOF ... EOF` automatically
+5. **Use ASCII titles** — Hebrew in UPGNOTESTEXT may cause encoding parse errors
+6. Clear `PREPARED` on the revision, then re-run TAKEUPGRADE before DOWNLOADUPG
+
+The DBI block runs before the BRING block in the shell, so the column exists by the time form definitions reference it.
 
 <!-- ADDED START -->
 ### Common Issues and Solutions

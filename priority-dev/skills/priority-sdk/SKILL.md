@@ -139,7 +139,7 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 | **`references/advanced-programming.md`** | WSCLIENT (REST/OAuth2), XMLPARSE, JSONPARSE, SFTPCLNT, FILTER, WINAPP, WINRUN, Dynamic SQL, Semaphores, Click2Sign |
 | **`references/debugging.md`** | Debug flags (-trc), optimization, logging, revisions, VSCode extension, HEAVYQUERY, **Claude Code MCP integration** |
 | **`references/vscode-bridge-examples.md`** | VSCode bridge tool usage examples: get_current_file, write_to_editor, refresh_editor, run_windbi_command (38 commands), common workflows (read→edit→compile, inspect, scaffold, search, ad-hoc queries) |
-| **`references/websdk-cookbook.md`** | **WebSDK tested patterns**: operation property reference, common mistakes, copy-paste recipes (read/hide/add columns, expressions, triggers, compile), SQLI metadata queries (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT), EFORM alias→real table mapping |
+| **`references/websdk-cookbook.md`** | **WebSDK tested patterns**: operation property reference (including `filter` with `operator` for LIKE/>=/<= searches), `filter` vs `search` distinction, common mistakes, copy-paste recipes (read/hide/add columns, expressions, triggers, compile), SQLI metadata queries (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT), EFORM alias→real table mapping |
 | **`references/web-cloud-dashboards.md`** | Priority Web differences, Cloud (system/sync), Dashboards/Priority Lite, BPM creation, Web SDK (CORS, connection, reports, search, procedures, encoding, performance) |
 
 ### Setup
@@ -229,6 +229,8 @@ To find specific content in reference files, search for these patterns:
 | ODBC | `ODBC\|priodbc` | `references/interfaces.md` |
 | VSCode bridge | `get_current_file\|write_to_editor\|run_windbi_command` | `references/vscode-bridge-examples.md` |
 | WebSDK operations | `websdk_form_action\|startSubForm\|getRows\|fieldUpdate\|EFORM` | `references/websdk-cookbook.md` |
+| WebSDK search/filter | `LIKE\|operator\|choose\|setSearchFilter\|clearFilter\|search` | `references/websdk-cookbook.md` |
 | Form metadata tables | `FORMCLMNS\|FORMTRIG\|FORMCLTRIGTEXT\|HIDEBOOL\|HIDE` | `references/websdk-cookbook.md` |
+| Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|generate_shell` | `references/debugging.md` |
 | MCP tools | `priority-dev\|priority-gateway\|bridge` | `references/debugging.md`, `references/vscode-bridge-examples.md` |
 | Scaffold | `createFormTrigger\|createProcedureStep` | `references/vscode-bridge-examples.md` |

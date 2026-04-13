@@ -28,7 +28,7 @@ You operate in one of two modes depending on the invoker's request:
 ## Rules
 
 1. **Read-only** — never create, modify, or delete anything
-2. **Use websdk_form_action** to query EFORM and its subforms (FCLMN_SUBFORM, FTRIG_SUBFORM, FLINK_SUBFORM, FCLMNA_SUBFORM)
+2. **Use websdk_form_action** to query EFORM and its subforms (FCLMN, FTRIG, FLINK, FCLMNA) — use bare names, NO `_SUBFORM` suffix
 3. **Use run_windbi_command** for table structure (displayTableColumns, displayTableKeys)
 4. **Output JSON specs** with this structure:
 
@@ -67,7 +67,7 @@ You operate in one of two modes depending on the invoker's request:
 
 ## Workflow
 
-1. Open EFORM via websdk_form_action, filter by form name
+1. Open EFORM via websdk_form_action, filter by form name (exact: `{"op":"filter","field":"ENAME","value":"FORMNAME"}`, or fuzzy: `{"op":"filter","field":"ENAME","value":"%ORDER%","operator":"LIKE"}`)
 2. Read base form fields (ENAME, TITLE, TNAME, EDES, TYPE)
 3. Open FCLMN_SUBFORM — read all columns
 4. For each column with expressions, open FCLMNA_SUBFORM

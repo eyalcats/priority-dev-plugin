@@ -33,7 +33,7 @@ Each operation in the `operations` array requires `op` plus operation-specific p
 
 | op | Required properties | Optional |
 |----|-------------------|----------|
-| `filter` | `field`, `value` | |
+| `filter` | `field`, `value` | `operator` (default `=`; supports `LIKE`, `>=`, `<=`, `!=`) |
 | `clearFilter` | *(none)* | |
 | `getRows` | | `fromRow` (1-based starting position, default 1). Also accepts legacy `count` as alias. |
 | `setActiveRow` | `row` (1-based) | |
@@ -91,6 +91,85 @@ WebSDK uses bare subform names. The `_SUBFORM` suffix is an OData URL convention
 | Using `IDCOLUMNE` in SQLI queries | "Unresolved identifier" | Real column is `IDCOLUMN` |
 | `getRows` without `fromRow` on root form | Returns 0 rows | Always `filter` before `getRows` on root forms. `getRows(1)` is default after fix. |
 | `filter` without later `setActiveRow(1)` | Subform operations fail | Always `setActiveRow(1)` after `filter` before navigating |
+
+---
+
+## Searching and Filtering
+
+### `filter` vs `search` — two different operations
+
+| Operation | WebSDK method | Purpose | Returns |
+|-----------|--------------|---------|---------|
+| `filter` | `setSearchFilter()` | Filter **rows** in the form (like SQL WHERE) | Nothing — rows are filtered, then use `getRows` |
+| `search` | `choose()` | Open a field's **dropdown/picker** (lookup values) | Option list: `{ retval, string1, string3 }` |
+
+**Do not confuse them.** `filter` narrows down which records appear in the form. `search` gets the list of valid values for a specific field (like clicking the magnifying glass).
+
+### Searching entities by name (LIKE filter)
+
+To find entities by partial name, use `operator: "LIKE"` with `%` wildcards:
+
+```json
+{
+  "form": "EFORM",
+  "operations": [
+    {"op": "filter", "field": "ENAME", "value": "%ORDER%", "operator": "LIKE"},
+    {"op": "getRows"}
+  ]
+}
+```
+
+This finds all forms whose ENAME contains "ORDER" (e.g., ORDERS, ORDERITEMS, PORDERS).
+
+### Filter operators
+
+The `filter` op supports these operators via the `operator` property:
+
+| Operator | Meaning | Example value |
+|----------|---------|---------------|
+| `=` | Exact match (default) | `"ORDERS"` |
+| `LIKE` | Pattern match | `"%ORDER%"` (contains), `"ORDER%"` (starts with) |
+| `>=` | Greater than or equal | `"A"` |
+| `<=` | Less than or equal | `"Z"` |
+| `!=` | Not equal | `"DELETED"` |
+
+### Clearing stale filter state
+
+When re-filtering a form that was already filtered, use `clearFilter` first:
+
+```json
+{
+  "form": "ORDERS",
+  "operations": [
+    {"op": "clearFilter"},
+    {"op": "filter", "field": "ORDNAME", "value": "SO26000001"},
+    {"op": "getRows"}
+  ]
+}
+```
+
+### Using `search` to look up field values
+
+The `search` op calls `choose()` on a field — returns the valid values the user can pick from:
+
+```json
+{
+  "form": "ORDERS",
+  "operations": [
+    {"op": "newRow"},
+    {"op": "search", "field": "CUSTNAME", "value": "ACM"}
+  ]
+}
+```
+
+Returns: `{ Search: { ChooseLine: [{ retval: "ACM001", string1: "Acme Corp", string3: "..." }, ...], next: 1 } }`
+
+- `retval` = the value to use in `fieldUpdate`
+- `string1` = display text (in procedures) or same as retval (in forms)
+- `string3` = description (in forms — often the meaningful label)
+- `next: 1` = more pages available (call `searchAction` to get them)
+
+**Important:** `choose()` requires a **new row or active editable row** context. On readonly rows it fails. The Gateway pattern: `newRow()` first, then `choose()`.
 
 ---
 

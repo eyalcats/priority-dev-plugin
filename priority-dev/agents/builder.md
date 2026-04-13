@@ -28,10 +28,10 @@ You create Priority ERP entities end-to-end from structural specs.
 
 1. **Create tables** via `run_inline_sqli` with `mode: "dbi"` — pass the full `CREATE TABLE ... UNIQUE(...);` DBI as the `sql` argument. No .pq file required.
 2. **Create forms** via `websdk_form_action` on EFORM (newRow, fieldUpdate ENAME/TITLE/TNAME/EDES/TYPE, saveRow)
-3. **Add columns** via EFORM → FCLMN_SUBFORM (startSubForm, newRow, fieldUpdate NAME/CNAME/TNAME/POS, saveRow)
-4. **Set column expressions** via FCLMN_SUBFORM → FCLMNA_SUBFORM (critical for text subforms: `{EXPR: ":$$.KLINE"}`)
+3. **Add columns** via EFORM → startSubForm(FCLMN) — NO `_SUBFORM` suffix (newRow, fieldUpdate NAME/CNAME/TNAME/POS, saveRow)
+4. **Set column expressions** via FCLMN → startSubForm(FCLMNA) (critical for text subforms: `{EXPR: ":$$.KLINE"}`)
 5. **Set column joins** — join info goes on the BASE table column row (JTNAME, JCNAME), NOT on the imported column
-6. **Add subform links** via EFORM → FLINK_SUBFORM
+6. **Add subform links** via EFORM → startSubForm(FLINK)
 7. **Create triggers** via `websdk_form_action` compound `createTrigger` op
 8. **Write trigger code** via `write_to_editor`
 9. **Compile** via `websdk_form_action` compound `compile` op
