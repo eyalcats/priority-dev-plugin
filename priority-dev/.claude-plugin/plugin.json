@@ -1,6 +1,6 @@
 {
   "name": "priority-dev",
-  "version": "1.6.12",
+  "version": "1.6.13",
   "description": "Priority ERP development tools for Claude Code — skill, agents, and hooks for the Priority VSCode bridge",
   "skills": "./skills/",
   "agents": [
