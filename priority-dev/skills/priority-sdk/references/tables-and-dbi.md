@@ -422,6 +422,9 @@ Requirements: tabula privilege group + `PRIVUSERS` = 1.
 
 The **Database Interpreter (DBI)** program is a database language for constructing and modifying database tables.
 
+**Important — DBI and upgrade change tracking:**
+DBI executed via `run_inline_sqli(mode=dbi)` or standalone `.pq` files bypasses Priority's change tracking system. Columns added this way to system tables will NOT be included automatically in upgrade shells by TAKEUPGRADE. To deploy them, you must manually add a UPGCODE="DBI" entry to the UPGNOTES subform in the UPGRADES form, with the DBI text in its UPGNOTESTEXT subform. See `references/debugging.md` → "Adding Manual DBI to UPGNOTES" for the full pattern. Columns added to custom tables (via TAKESINGLEENT on the form) are handled automatically.
+
 ### Syntax Conventions
 
 - `[ ]` = optional
