@@ -2,9 +2,9 @@
 
 ## Prerequisites
 
-- [Claude Code CLI](https://claude.ai/code) installed
-- [VSCode](https://code.visualstudio.com/) installed
-- (Recommended) [Priority Dev Tools](https://marketplace.visualstudio.com/items?itemName=PrioritySoftware.priority-vscode) VSCode extension with at least one Priority environment configured — the bridge reads its credentials from there automatically
+- [Claude Code CLI](https://claude.ai/code)
+- [VSCode](https://code.visualstudio.com/)
+- Recommended: [Priority Dev Tools](https://marketplace.visualstudio.com/items?itemName=PrioritySoftware.priority-vscode) with one Priority environment configured. The bridge reads those credentials directly.
 
 ## Quick install
 
@@ -13,38 +13,37 @@ claude plugin marketplace add eyalcats/priority-dev-plugin
 claude plugin install priority-dev
 ```
 
-Then **open the project in VSCode and start a Claude Code session inside the integrated terminal**:
+Open the project in VSCode and start Claude Code in the integrated terminal:
 
 ```
 claude
 ```
 
-On session start, the plugin's `ensure-bridge.sh` hook auto-installs the Priority Claude Bridge VSCode extension from the bundled VSIX via `code --install-extension`. You'll see a message telling you to reload the VSCode window.
+The `ensure-bridge.sh` hook runs on session start and installs the bridge VSIX via `code --install-extension`. When it finishes, reload VSCode:
 
 1. `Ctrl+Shift+P` → `Developer: Reload Window`
-2. After reload, the status bar shows **⚠ Priority Bridge** (not yet licensed)
-3. A one-time info toast appears: *"Click the Priority Bridge item in the status bar to set up."*
-4. Click the status bar item (or run `Priority Bridge: Setup` from the command palette)
+2. The status bar shows **⚠ Priority Bridge** — the bridge is installed but unlicensed
+3. A toast prompts you to click the status bar item
+4. Click it (or run `Priority Bridge: Setup` from the command palette)
 
 ## License activation
 
-The Setup quick-pick shows these options:
+The Setup quick-pick offers:
 
-- **Copy Machine ID** — copies your per-machine ID to clipboard
-- **Request License…** — opens your default email client with a pre-filled request (machine ID + requested expiry already in the body)
-- **Paste License JSON** — paste the one-line license blob your admin sent you
-- **Load License File…** — pick a `license.json` file from disk
-- **Install Priority Dev Claude Code Plugin** — only shown if the Claude Code plugin is not already installed
+- **Copy Machine ID** — copies the machine ID to the clipboard
+- **Request License…** — opens your email client with machine ID and requested expiry pre-filled
+- **Paste License JSON** — paste the one-line license your admin sent
+- **Load License File…** — pick a `license.json` from disk
+- **Install Priority Dev Claude Code Plugin** — appears when the plugin is missing
 
 ### Typical flow
 
-1. Click **Request License…** → your email client opens with everything ready → send to your admin
-2. Admin runs `node tools/generate-license.js --machine-id YOUR_ID --expires 2027-MM-DD` in the plugin repo. The generator prints a one-line JSON blob that fits in a chat message or email body
-3. Admin replies with the one-line JSON
-4. You click **Paste License JSON** → paste the line → bridge activates
-5. Status bar now shows **✓ Priority Bridge — expires YYYY-MM-DD**
+1. Click **Request License…** and send the pre-filled email to your admin
+2. Admin runs `node tools/generate-license.js --machine-id YOUR_ID --expires 2027-MM-DD` and replies with the one-line JSON
+3. Click **Paste License JSON**, paste the line, and the bridge activates
+4. Status bar shows **✓ Priority Bridge — expires YYYY-MM-DD**
 
-You can also set `priorityClaudeBridge.licenseAdminEmail` in VSCode settings so the mailto pre-fills the recipient too.
+To pre-fill the admin address, set `priorityClaudeBridge.licenseAdminEmail` in VSCode settings.
 
 ## Updating
 
@@ -52,13 +51,13 @@ You can also set `priorityClaudeBridge.licenseAdminEmail` in VSCode settings so 
 claude plugin update priority-dev@priority-dev-marketplace
 ```
 
-On the next Claude Code session, `ensure-bridge.sh` detects the newer VSIX shipped with the plugin and auto-upgrades the installed extension. Reload the window once to activate. No manual file dialog needed.
+On the next Claude Code session, `ensure-bridge.sh` detects the newer VSIX and upgrades the extension. Reload the window once to activate.
 
-> **Important: `claude plugin marketplace add` does NOT refresh an existing marketplace.** If you already added `eyalcats/priority-dev-plugin` before, running `marketplace add` again is a no-op — Claude Code says *"already declared in user settings"* and keeps the stale local clone. `claude plugin install` will then pull the old version from that stale clone. **Always use `claude plugin update`** for upgrades, or do a full marketplace reset (see below).
+> **Use `claude plugin update` for upgrades.** `claude plugin marketplace add` is a no-op once the marketplace is registered — it prints *"already declared in user settings"* and keeps the stale local clone, so `claude plugin install` then reinstalls the old version. If `update` still won't pull the latest, reset the marketplace (below).
 
-### Full marketplace reset (when updates don't pull the latest)
+### Full marketplace reset
 
-If `claude plugin update` doesn't bring you to the latest version — usually because the local marketplace clone is pinned and the update mechanism isn't re-fetching — wipe the local clone and re-add:
+If `claude plugin update` stays on an old version, the local clone is pinned. Wipe it and re-add:
 
 ```powershell
 # PowerShell
@@ -78,20 +77,20 @@ claude plugin marketplace add eyalcats/priority-dev-plugin
 claude plugin install priority-dev
 ```
 
-Then start a fresh `claude` session in VSCode and reload the window when the bridge auto-install finishes.
+Start a fresh `claude` session in VSCode and reload the window once the bridge auto-install finishes.
 
 ## Manual install (fallback)
 
-If the auto-install hook doesn't run (extraction tools missing, locked directory, etc.), install the VSIX manually:
+If the auto-install hook fails — missing extraction tools, a locked directory, and so on — install the VSIX by hand:
 
 1. `Ctrl+Shift+P` → `Extensions: Install from VSIX…`
-2. Navigate to `%USERPROFILE%\.claude\plugins\cache\priority-dev-marketplace\priority-dev\<version>\bridge\` and pick the only `.vsix` file in there (replace `<version>` with the latest installed — e.g., `1.6.4`)
+2. Open `%USERPROFILE%\.claude\plugins\cache\priority-dev-marketplace\priority-dev\<version>\bridge\` and pick the `.vsix` file (for example, `1.6.4`)
 3. Reload VSCode
 
 ## Verify
 
 1. Status bar shows **✓ Priority Bridge — expires YYYY-MM-DD**
-2. Open any Priority entity file from the Priority Dev Tools extension's Environments Explorer
+2. Open a Priority entity from the Priority Dev Tools Environments Explorer
 3. In the Claude Code session, ask: `list the Priority bridge tools available`
 
-You should see: `get_current_file`, `write_to_editor`, `refresh_editor`, `run_windbi_command`, `websdk_form_action`, `run_inline_sqli`.
+Expected tools: `get_current_file`, `write_to_editor`, `refresh_editor`, `run_windbi_command`, `websdk_form_action`, `run_inline_sqli`.

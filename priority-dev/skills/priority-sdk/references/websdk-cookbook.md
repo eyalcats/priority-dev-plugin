@@ -49,6 +49,16 @@ Each operation in the `operations` array requires `op` plus operation-specific p
 | `warningConfirm` | *(none)* | |
 | `infoMsgConfirm` | *(none)* | |
 
+### Trigger messages are surfaced on op results
+
+`newRow`, `fieldUpdate`, `saveRow`, and `deleteRow` capture WRNMSG / PRINT / ERRMSG fired by form and column triggers. Inspect each op's result:
+
+- `result.status === 'warning'` + `result.warning` → a WRNMSG fired (auto-confirmed, chain continues). Read it to understand why the form is objecting before the next op runs.
+- `result.info` → a PRINT / ENTMESSAGE fired (auto-confirmed). Useful for diagnostic output from POST-INSERT / POST-UPDATE.
+- `result.status === 'error'` + `result.error` → an ERRMSG blocked the op. Do not continue the chain blindly — read the text and adjust.
+
+When an insert/update/delete misbehaves, scan the results array for these fields *before* assuming the change landed — the trigger message usually explains the missing prerequisite or validation failure.
+
 ### Critical: `startSubForm` uses `name`, not `subform`
 
 ```json
@@ -230,11 +240,14 @@ To unhide: `SET HIDE = ''`.
 
 ### Add a column to a form
 
+**CRITICAL:** Always include `getRows` between `filter` and `setActiveRow`. Without it, `setActiveRow(1)` doesn't scope to the filtered set and `newRow` on the subform lands on EFORM's own meta-form (EXEC=9061) with no error — silent parent-scoping failure.
+
 ```json
 {
   "form": "EFORM",
   "operations": [
     {"op": "filter", "field": "ENAME", "value": "MY_FORM"},
+    {"op": "getRows", "fromRow": 1},
     {"op": "setActiveRow", "row": 1},
     {"op": "startSubForm", "name": "FCLMN"},
     {"op": "newRow"},
@@ -250,6 +263,14 @@ To unhide: `SET HIDE = ''`.
 For hidden columns add `{"op": "fieldUpdate", "field": "HIDEBOOL", "value": "Y"}` before saveRow.
 
 For private dev columns (SOF_ prefix) on system tables, add `{"op": "fieldUpdate", "field": "IDCOLUMNE", "value": "6"}`.
+
+**For CHAR(1) Y/N columns that should render as a checkbox in the web client**, add `{"op": "fieldUpdate", "field": "BOOLEAN", "value": "Y"}`. Without this, the column displays as a 1-character text input. Verified 2026-04-15.
+
+Verify via direct SQL after save:
+```sql
+SELECT FORM, NAME, POS FROM FORMCLMNS WHERE NAME = 'COL_NAME';
+```
+`FORM` must equal the target form's EXEC id (e.g., `4351` for ACCOUNTS_PAYABLE), NOT `9061` (EFORM itself). If you see `9061`, the `getRows` step was missing.
 
 ### Add a column with a join (foreign key)
 

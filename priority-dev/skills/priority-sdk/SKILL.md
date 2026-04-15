@@ -45,8 +45,9 @@ All custom entities must start with a **four-letter prefix** (e.g., `ACME_ORDERS
 
 ### Critical Rules
 
+- **Verify entity names before designing or coding.** When the user mentions a form/table, resolve the name via `websdk_form_action` on EFORM (`filter ENAME`) or `displayTableColumns`. Form name ≠ table name (e.g., `ACCOUNTS_PAYABLE` form → `ACCOUNTS` table). If a name does not resolve, ask the user — never propose a plausible-sounding alternative.
 - **Entity names must be <= 20 characters** — alphanumeric and underscore only, must begin with a letter. Violations cause silent failures.
-- Never INSERT/UPDATE data in standard tables directly. Use interfaces (INTERFACE program).
+- **Never INSERT/UPDATE data in standard tables directly. Use form interfaces (INTERFACE program with GENERALLOAD or dynamic `-form`)** — raw SQL bypasses form and column triggers, integrity checks, and privilege rules, causing silent business-logic breakage. Direct SQL `UPDATE`/`INSERT` is acceptable ONLY for small, targeted changes that do not affect triggered business logic, and ONLY after proposing it to the user and receiving explicit approval.
 - Every LINK/UNLINK operation must be followed by a success check.
 - Use `ENTMESSAGE` for non-ASCII text in code (e.g., Hebrew messages).
 - Custom form messages must use numbers > 500.

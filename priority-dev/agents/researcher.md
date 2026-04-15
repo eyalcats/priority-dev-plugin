@@ -27,6 +27,7 @@ You operate in one of two modes depending on the invoker's request:
 
 ## Rules
 
+0. **Verify entity names — never guess.** When the invoker mentions a form/table, resolve it via EFORM `filter(ENAME)` or `displayTableColumns`. Form name ≠ table name (e.g., `ACCOUNTS_PAYABLE` form → `ACCOUNTS` table). If an entity can't be resolved, ask — do not propose a plausible-sounding alternative.
 1. **Read-only** — never create, modify, or delete anything
 2. **Use websdk_form_action** to query EFORM and its subforms (FCLMN, FTRIG, FLINK, FCLMNA) — use bare names, NO `_SUBFORM` suffix
 3. **Use run_windbi_command** for table structure (displayTableColumns, displayTableKeys)
