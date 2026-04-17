@@ -420,6 +420,218 @@ FORMPREPERRS has no filterable columns — it auto-shows errors from the last co
 }
 ```
 
+### Find a form's internal ID
+
+Several DBI/SQLI patterns (notably writing column-trigger code into `FORMCLTRIGTEXT`) need the form's numeric `EXEC` ID, not its name:
+
+```sql
+SELECT EXEC FROM EXEC WHERE ENAME = 'MY_FORM' AND TYPE = 'F' FORMAT;
+```
+
+`TYPE` is `F` (form), `P` (procedure), `R` (report), or `T` (table). When inserting in bulk you can also embed the lookup as a subquery — see `### Query column-level triggers and their code` below for the pattern.
+
+---
+
+## Recipe: Text Subform Creation (canonical 6-call)
+
+Build a custom-prefixed text/remarks subform on a parent form (parent must have a custom prefix). End-to-end in 6 tool calls with zero failed attempts.
+
+**Inputs:**
+- `<TEXTFORM>` — name of the new text form/table (e.g., `SOF_CUSTSIGNTEXT`). Must start with a 4-letter prefix.
+- `<PARENT>` — parent form name (e.g., `SOF_CUSTSIGN`). Must have a custom prefix.
+- `<PARENTKEY>` — parent's key column name (e.g., `KLINE`).
+
+**Pre-flight (optional but recommended) — confirm the parent exists and exposes the key:**
+```sql
+SELECT EXEC, ENAME FROM EXEC WHERE ENAME = '<PARENT>' AND TYPE = 'F' FORMAT;
+SELECT NAME FROM FORMCLMNS WHERE FORM = (SELECT EXEC FROM EXEC
+ WHERE ENAME = '<PARENT>' AND TYPE = 'F') AND NAME = '<PARENTKEY>' FORMAT;
+```
+
+### Call 1 — DBI: create the text table
+
+`run_inline_sqli` with `mode: "dbi"`:
+```sql
+CREATE TABLE <TEXTFORM> 'Remarks' 0
+KLINE (INT,13,'Parent Key')
+TEXT (RCHAR,68,'Text')
+TEXTLINE (INT,8,'Line')
+TEXTORD (INT,8,'Sort')
+UNIQUE (KLINE, TEXTLINE);
+```
+
+**No `/` separators between columns** — DBI uses whitespace. `/` produces `parse error AT OR NEAR SYMBOL /`.
+
+### Call 2 — EFORM: create form + configure all 4 columns + KLINE expression
+
+```json
+{
+  "form": "EFORM",
+  "operations": [
+    {"op": "newRow"},
+    {"op": "fieldUpdate", "field": "ENAME", "value": "<TEXTFORM>"},
+    {"op": "fieldUpdate", "field": "TNAME", "value": "<TEXTFORM>"},
+    {"op": "fieldUpdate", "field": "EDES",  "value": "LOG"},
+    {"op": "fieldUpdate", "field": "TITLE", "value": "Remarks"},
+    {"op": "fieldUpdate", "field": "MODULENAME", "value": "Internal Development"},
+    {"op": "saveRow"},
+
+    {"op": "filter", "field": "ENAME", "value": "<TEXTFORM>"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "startSubForm", "name": "FCLMN"},
+
+    {"op": "filter", "field": "NAME", "value": "KLINE"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "fieldUpdate", "field": "HIDEBOOL",   "value": "Y"},
+    {"op": "fieldUpdate", "field": "EXPRESSION", "value": "Y"},
+    {"op": "saveRow"},
+    {"op": "startSubForm", "name": "FCLMNA"},
+    {"op": "newRow"},
+    {"op": "fieldUpdate", "field": "EXPR", "value": ":$$.<PARENTKEY>"},
+    {"op": "saveRow"},
+    {"op": "endSubForm"},
+
+    {"op": "clearFilter"},
+    {"op": "filter", "field": "NAME", "value": "TEXTLINE"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "fieldUpdate", "field": "HIDEBOOL", "value": "Y"},
+    {"op": "saveRow"},
+
+    {"op": "clearFilter"},
+    {"op": "filter", "field": "NAME", "value": "TEXTORD"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "fieldUpdate", "field": "HIDEBOOL", "value": "Y"},
+    {"op": "fieldUpdate", "field": "ORD",      "value": "1"},
+    {"op": "saveRow"}
+  ]
+}
+```
+
+`EDES = "LOG"` is mandatory — it flags the form as a log/text form so the web client renders the HTML editor. The 4 FCLMN rows already exist (auto-populated from the base table) — never `newRow` them, only update.
+
+### Call 3 — EFORM: add 3 form-level trigger slots + 1 column-level POST-FIELD slot
+
+```json
+{
+  "form": "EFORM",
+  "operations": [
+    {"op": "filter", "field": "ENAME", "value": "<TEXTFORM>"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "startSubForm", "name": "FTRIG"},
+    {"op": "newRow"}, {"op": "fieldUpdate", "field": "TRIGNAME", "value": "PRE-UPDATE"},          {"op": "saveRow"},
+    {"op": "newRow"}, {"op": "fieldUpdate", "field": "TRIGNAME", "value": "POST-DELETE"},         {"op": "saveRow"},
+    {"op": "newRow"}, {"op": "fieldUpdate", "field": "TRIGNAME", "value": "PRE-UPD-DEL-SCRLINE"}, {"op": "saveRow"},
+    {"op": "endSubForm"},
+
+    {"op": "startSubForm", "name": "FCLMN"},
+    {"op": "filter", "field": "NAME", "value": "TEXT"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "startSubForm", "name": "FORMCLTRIG"},
+    {"op": "newRow"},
+    {"op": "fieldUpdate", "field": "TRIGNAME", "value": "POST-FIELD"},
+    {"op": "saveRow"}
+  ]
+}
+```
+
+### Call 4 — three `write_to_editor` calls **in parallel** (one assistant message)
+
+Form-level trigger code. Always reference the parent key with `:$$.<PARENTKEY>` (parent form), never `:$.<PARENTKEY>`.
+
+`PRE-UPDATE`:
+```
+SELECT 0 + :SCRLINE INTO :$.TEXTORD FROM DUMMY ;
+```
+
+`POST-DELETE`:
+```
+UPDATE <TEXTFORM>
+ SET TEXTORD = TEXTORD - 1
+ WHERE KLINE = :$$.<PARENTKEY>
+ AND TEXTORD >= :SCRLINE ;
+```
+
+`PRE-UPD-DEL-SCRLINE`:
+```
+SELECT TEXTORD INTO :SCRLINE
+ FROM <TEXTFORM>
+ WHERE KLINE = :$$.<PARENTKEY>
+ AND TEXTLINE = :$.TEXTLINE ;
+```
+
+### Call 5 — DBI: insert all 14 column-trigger lines (POST-FIELD on TEXT)
+
+`FORMCLTRIGTEXT.TRIG = 11` for POST-FIELD. The form ID is the EXEC of `<TEXTFORM>` — easiest to fetch first then plug in (Priority SQLI does not support subqueries inside `VALUES`).
+
+First call — get the ID:
+```sql
+SELECT EXEC FROM EXEC WHERE ENAME = '<TEXTFORM>' AND TYPE = 'F' FORMAT;
+```
+
+Then DBI (substitute `<FORMID>`):
+```sql
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 1, 1,'SELECT :SCRLINE INTO :$.TEXTORD');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 2, 2,' FROM DUMMY ;');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 3, 3,'GOTO 1 WHERE :$.TEXTLINE > 0;');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 4, 4,'SELECT 1 INTO :$.TEXTLINE');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 5, 5,' FROM DUMMY ;');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 6, 6,'SELECT MAX(TEXTLINE)+1');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 7, 7,' INTO :$.TEXTLINE');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 8, 8,' FROM <TEXTFORM>');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11, 9, 9,' WHERE KLINE = :$$.<PARENTKEY>;');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11,10,10,'UPDATE <TEXTFORM>');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11,11,11,' SET TEXTORD = TEXTORD + 1');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11,12,12,' WHERE KLINE = :$$.<PARENTKEY>');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11,13,13,' AND TEXTORD >= :SCRLINE ;');
+INSERT INTO FORMCLTRIGTEXT (FORM,NAME,TRIG,TEXTLINE,TEXTORD,TEXT) VALUES (<FORMID>,'TEXT',11,14,14,'LABEL 1;');
+```
+
+DBI inserts persist immediately and are not subject to the `newRow`-on-FORMCLTRIGTEXT silent-append bug.
+
+### Call 6 — EFORM: compile text form + link as subform on parent + compile parent
+
+```json
+{
+  "operations": [
+    {"op": "compile", "entity": "<TEXTFORM>"},
+
+    {"op": "filter", "field": "ENAME", "value": "<PARENT>"},
+    {"op": "getRows"},
+    {"op": "setActiveRow", "row": 1},
+    {"op": "startSubForm", "name": "FLINK"},
+    {"op": "newRow"},
+    {"op": "fieldUpdate", "field": "FNAME", "value": "<TEXTFORM>"},
+    {"op": "saveRow"},
+
+    {"op": "compile", "entity": "<PARENT>"}
+  ]
+}
+```
+
+### Common failures (avoid)
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| DBI `parse error AT OR NEAR SYMBOL /` | Used `/` between columns in `CREATE TABLE` | Whitespace only |
+| `<table> Unresolved identifier` on `FORMS`, `FORMMAIN`, `SYSTABLES` | These tables don't exist | Use `EXEC`, `FORMCLMNS`, `FORMTRIG` (see "Key system tables") |
+| `setActiveRow` writes land on wrong parent (EFORM EXEC=9061) | Missing `getRows` between `filter` and `setActiveRow` | Always `filter` → `getRows` → `setActiveRow` |
+| Column trigger compiles but fires nothing at runtime | WebSDK `newRow` on `FORMCLTRIGTEXT` silently appended duplicate lines | Use DBI INSERT (Call 5 above) — never WebSDK newRow on FORMCLTRIGTEXT |
+| HTML editor doesn't render in web client | `EDES` missing or wrong | Must be `LOG` |
+| Subform shows empty / no parent linkage | Missing FCLMNA EXPR on KLINE | `:$$.<PARENTKEY>` (parent form ref, two `$`) |
+
+### Why this works in 6 calls
+
+- Call 2 walks all four columns in one EFORM session via repeated `clearFilter → filter → setActiveRow` cycles — saves 3 round-trips vs. one call per column.
+- Call 5 uses DBI rather than WebSDK newRow, dodging the FORMCLTRIGTEXT append bug and inserting all 14 lines in one network hop.
+- Call 6 chains compile + link + compile through the existing `compile` compound + EFORM primitives in one operations array.
+- Pre-existing rows (FCLMN columns auto-populated by the base table) are updated in place — no `newRow` for the 4 base columns.
+
 ---
 
 ## SQLI Metadata Queries

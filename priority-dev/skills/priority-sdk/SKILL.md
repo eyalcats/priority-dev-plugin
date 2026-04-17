@@ -232,6 +232,8 @@ To find specific content in reference files, search for these patterns:
 | WebSDK operations | `websdk_form_action\|startSubForm\|getRows\|fieldUpdate\|EFORM` | `references/websdk-cookbook.md` |
 | WebSDK search/filter | `LIKE\|operator\|choose\|setSearchFilter\|clearFilter\|search` | `references/websdk-cookbook.md` |
 | Form metadata tables | `FORMCLMNS\|FORMTRIG\|FORMCLTRIGTEXT\|HIDEBOOL\|HIDE` | `references/websdk-cookbook.md` |
+| Text subform recipe (6-call) | `Text Subform Creation\|TEXTFORM\|EDES.*LOG\|FCLMNA.*EXPR` | `references/websdk-cookbook.md` |
+| Find form internal ID | `Find a form's internal ID\|EXEC FROM EXEC` | `references/websdk-cookbook.md` |
 | Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|generate_shell` | `references/debugging.md` |
 | MCP tools | `priority-dev\|priority-gateway\|bridge` | `references/debugging.md`, `references/vscode-bridge-examples.md` |
 | Scaffold | `createFormTrigger\|createProcedureStep` | `references/vscode-bridge-examples.md` |
