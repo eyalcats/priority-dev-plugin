@@ -450,6 +450,36 @@ UNIQUE (column_name, ... )
 [ NONUNIQUE ... ];
 ```
 
+**DBI Pitfalls — must read before writing CREATE TABLE**
+
+These constraints cause silent parse errors or rejected DDL. Confirmed 2026-04-17 on live Priority DBI.
+
+1. **Use the Priority column form `COL (TYPE, WIDTH, 'Title')` — NOT SQL-standard `COL TYPE(WIDTH) NOT NULL`.** Parens go around the whole `(type, width, 'title')` triple, not around the width. SQL-standard syntax is silently rejected with cryptic parse errors.
+
+```sql
+/* WRONG — SQL-standard syntax */
+CREATE TABLE X (COL CHAR(1) NOT NULL) UNIQUE (COL);
+
+/* CORRECT — Priority DBI */
+CREATE TABLE X 0
+COL (CHAR, 1, 'Title')
+UNIQUE (COL);
+```
+
+2. **`TIME` width must be ≥ 5.** Width 4 is rejected with parse error. Use 5 (HH:MM, displayed as `hh:mm`) or 6 (HH:MM:SS where seconds are kept).
+
+3. **Reserved words that cannot be column names:** `REFRESH`, likely others (any SQLI verb used in triggers). If the plan calls for a `REFRESH` column, rename to `DOREFRESH` or similar. Priority errors with "table must have at least one key" or parse error at the column line.
+
+4. **`AUTOUNIQUE` requires a co-existing `UNIQUE` key.** Standalone `AUTOUNIQUE (col)` is rejected with "table must have at least one key of type U". Two correct patterns:
+   - `AUTOUNIQUE (ID) UNIQUE (OTHER_COL)` — separate autounique + natural key
+   - `UNIQUE (ID)` at DBI, plus `FCLMN SUM='U'` on the form column for auto-increment on INSERT (form-level autounique)
+
+5. **DBI column titles: ≤ 20 chars, ASCII-only.** Hebrew titles in DBI may cause encoding issues during upgrade shells. Put Hebrew titles on the form column via `COLTITLE` (WebSDK), not in the DBI.
+
+6. **`DELETE TABLE` can be blocked by form column dependencies.** If any form has FCLMN columns pointing at the table (via `TNAME` or `JTNAME`), `DELETE TABLE` fails. Remove the form columns first (or drop the form), then delete the table.
+
+7. **`CmdDbi` via `run_inline_sqli mode=dbi` supports both `CREATE TABLE` and `DELETE TABLE`** — you don't need a `.pq` file. Some older memory claims otherwise; it's outdated.
+
 **Delete a table:**
 ```sql
 DELETE TABLE table_name;

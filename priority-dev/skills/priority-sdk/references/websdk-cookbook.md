@@ -342,7 +342,90 @@ EXPR is max 56 chars. For longer expressions, add continuation via FCLMNTEXT:
 }
 ```
 
-### Add a subform link
+### Create a new root form on a custom table
+
+**Confirmed 2026-04-17** — raw WebSDK root-form creation works for flat forms on existing custom (SOF_/ASTR_ prefix) tables. Older memory suggested the UI-only rule; it was too broad.
+
+```json
+{
+  "form": "EFORM",
+  "operations": [
+    {"op": "newRow"},
+    {"op": "fieldUpdate", "field": "ENAME",      "value": "SOF_MYFORM"},
+    {"op": "fieldUpdate", "field": "TITLE",      "value": "כותרת בעברית"},
+    {"op": "fieldUpdate", "field": "TNAME",      "value": "SOF_MYTABLE"},
+    {"op": "fieldUpdate", "field": "EDES",       "value": "SOF"},
+    {"op": "fieldUpdate", "field": "MODULENAME", "value": "פיתוח פרטי"},
+    {"op": "saveRow"}
+  ]
+}
+```
+
+**EFORM field aliases** (WebSDK view):
+- `TITLE` — Hebrew title (NOT `ETITLE`)
+- `MODULENAME` — Hebrew module (NOT `DNAME`). For SoftSolutions custom: `'פיתוח פרטי'`
+- `EDES` — entity group. For SoftSolutions custom forms: `'SOF'`
+
+**Auto-seed gift** — when `saveRow` commits an EFORM row with `TNAME` set, Priority **auto-populates FCLMN** with every column of the named table at POS 10/20/30... So for a simple table-form you don't add columns manually — just adjust the seeded ones (COLTITLE, HIDEBOOL, BOOLEAN, etc.).
+
+Known failures where the UI Form Generator is still required:
+- Forms on **system** tables (INVOICES, DOCUMENTS, ACCOUNTS) — extra runtime catalog setup needed
+- Forms with special `FORMTYPE` (document headers)
+- If FORMPREP returns `אין מסך בשם זה` despite a clean EFORM row, compare with a known-good form's FCLMN/FLINK/FTRIG rows side-by-side to find what differs
+
+### Create a subform + link it to a parent
+
+Subform creation is a **four-step sequence**. FLINK has no parent-key / child-key fields — the join lives on the subform's FCLMN expression.
+
+```text
+/* 1. Create the subform on EFORM — same as root-form creation above */
+EFORM → newRow
+  ENAME=SOF_MYSUB, TITLE=…, TNAME=SOF_MYSUB, EDES=SOF, MODULENAME=פיתוח פרטי
+saveRow
+/* FCLMN auto-seeds all columns of SOF_MYSUB */
+
+/* 2. Mark the subform's parent-link column (the FK to the parent) */
+EFORM → filter(ENAME, SOF_MYSUB) → setActiveRow(1)
+startSubForm(FCLMN)
+filter(NAME, PARENTKEY) → setActiveRow(1)
+fieldUpdate(HIDEBOOL,   Y)
+fieldUpdate(EXPRESSION, Y)
+saveRow
+startSubForm(FCLMNA)
+newRow
+fieldUpdate(EXPR, ':$$.PARENTPK')   /* :$$. reaches into the PARENT form */
+saveRow
+
+/* 3. Wire FLINK on the PARENT form */
+EFORM → filter(ENAME, SOF_PARENT) → setActiveRow(1)
+startSubForm(FLINK)
+newRow
+fieldUpdate(FNAME,      SOF_MYSUB)
+fieldUpdate(TITLE,      'title shown in parent')
+fieldUpdate(APOS,       10)            /* display order */
+fieldUpdate(MODULENAME, 'פיתוח פרטי')
+saveRow
+
+/* 4. Compile both */
+run_windbi_command  priority.prepareForm  SOF_MYSUB
+run_windbi_command  priority.prepareForm  SOF_PARENT
+```
+
+**Key fact:** FLINK rows carry only `FNAME / TITLE / APOS / MODULENAME`. No parent-key / child-key columns. The key mapping is established by the subform's FCLMN.EXPRESSION=Y + FCLMNA.EXPR=':$$.PARENTPK' — Priority resolves the relationship at compile time.
+
+### FCLMNA gap: conditional visibility (COND) not reachable via WebSDK
+
+FCLMNA exposes only `EXPR` via WebSDK. The `COND` / `BIG` field that drives "show column X only when TYPE='C'" is **not accessible**. Workarounds:
+
+- Accept all columns visible (fine for admin/config forms)
+- POST-FIELD trigger that programmatically shows/hides columns
+- Direct SQLI INSERT into the underlying FORMCLMNSA table (same bypass pattern as `FORMCLTRIGTEXT`)
+
+### Join metadata placement
+
+Join info (`JTNAME`, `JCNAME`, `IDJOINE`) goes on the **base-table FCLMN row**, NOT on the imported display column. Project rule: `IDJOINE` values in custom forms must be `> 5`. The underlying FORMCLMNS column is named `IDJOIN` (no trailing E — that's the EFORM alias) with width 2 — values up to 99 are accepted.
+
+### Add a subform link (generic, minimal)
 
 ```json
 {
