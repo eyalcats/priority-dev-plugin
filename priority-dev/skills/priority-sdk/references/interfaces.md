@@ -1245,3 +1245,40 @@ The Priority ODBC Driver (`priodbc.zip`) is available from the official Priority
 ### Text Encoding Issues
 
 When querying Priority via ODBC, English text may appear garbled or reversed while Hebrew displays correctly. This is typically related to the SQL Server version and encoding settings. Verify the query encoding and SQL Server collation settings.
+
+## EDI form-load internals
+
+Static EDI interfaces defined in the Form Load Designer persist in several system tables. Understanding which table holds which metadata is essential when diagnosing broken interfaces or attempting programmatic modifications.
+
+### Underlying tables
+
+| Table | Purpose | Related form table |
+|---|---|---|
+| `EINTER` | Interface header (name, type, description) | EDI form |
+| `INTERFORMS` | Columns and triggers for each form in the interface | Maps to FORMCLTRIG on the underlying form |
+| `INTERCLMNSFILE` | Column-to-file-field mappings | Maps to FORMCLMNS on the underlying form |
+
+When an interface is compiled, Priority materialises its configuration onto the underlying form's FORMCLTRIG / FORMCLMNS — reading those tables reveals the actual runtime wiring.
+
+### ENAME field truncates at 20 characters
+
+`EINTER.ENAME` (and related FK references) is CHAR(20). Interface names longer than 20 characters silently lose the tail on insert — subsequent `EXECUTE INTERFACE '<long name>'` calls fail with "interface not found" because the stored name is truncated. Keep interface names ≤ 20 characters.
+
+### Raw-SQL INSERT recipe (dev/diagnostic only)
+
+For diagnosing interface behavior on a development server, rows can be inserted into `INTERFORMS` / `INTERCLMNSFILE` directly via SQLI. This bypasses EDI form triggers and does not re-compile the interface — only useful for inspection or ad-hoc testing.
+
+Per the project rule "form interface over raw UPDATE", production interface changes go through the EDI form, not raw INSERT.
+
+### EDI interface creation via WebSDK is partially blocked
+
+- **EINTER** (interface header) — works via WebSDK (`filter`, `newRow`, `fieldUpdate`, `saveRow`).
+- **INTERFORMS** subform — works via WebSDK.
+- **INTERCLMNSFILE** subform — the CHOOSE-FIELD popup for the column-mapping field cannot be confirmed programmatically. This subform must be edited through the Priority UI or bypassed.
+
+### Workarounds for the INTERCLMNSFILE blocker
+
+1. **Dynamic `-form` interfaces** — generate the interface at runtime with the `-form` flag. No EDI definition row needed; the interface definition is constructed inline from the load parameters. Preferred for runtime loads driven by a procedure.
+2. **Raw SQLI on INTERCLMNSFILE** — only for static EDI setups where business triggers on INTERCLMNSFILE are not needed, and only with explicit user approval per the "form interface over raw UPDATE" rule.
+
+See § "Dynamic Interfaces" above for the `-form` pattern.

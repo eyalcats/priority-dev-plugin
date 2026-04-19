@@ -597,6 +597,49 @@ For the HTMLCURSOR to pass the current record key to a report:
 - New steps must be added to EVERY format that should run them
 - This is the #1 cause of "steps don't execute" for new HTMLDOC sections
 
+### Filter by parameter with `= 0+ :VAR`
+
+When a report column must restrict to a parameter value passed from the cursor (e.g., `INVOICES.IV = :IV`), the filter column needs `EXPRESSION='Y'` with a REPCLMNSA condition that starts with the comparison operator:
+
+```
+= 0+ :IV
+```
+
+This generates `WHERE INVOICES.IV = 0+ :IV`. The `0+` forces numeric coercion and matches the WWWIV_3 POS 99 pattern used across standard invoice reports.
+
+Without this form of condition, the report ignores the parameter and returns all rows.
+
+### `#POS` references break when source column has a condition
+
+When a column has a predefined condition (e.g., the filter column at POS 500 with `= 0+ :IV`), other columns referencing `#500` in their expressions receive the **condition text**, not the parameter value. Downstream calculations produce garbage.
+
+Fix: reference the underlying column directly (e.g., `INVOICES.IV`) in expressions, never `#500` tokens, when the source column carries a condition.
+
+### WebSDK REPCLMNS navigation
+
+Use `filter(POS, "500")` to target a specific report column. Do NOT rely on `setActiveRow` by numeric index — REPCLMNS row ordering is unreliable across refreshes.
+
+```
+filter EREP (ENAME, "MYREPORT") → getRows → setActiveRow(1)
+  → startSubForm(REPCLMNS)
+  → filter(POS, "500")
+  → getRows (confirm count > 0)
+  → setActiveRow
+  → startSubForm(REPCLMNSA)
+  → fieldUpdate(…)
+  → saveRow
+```
+
+### Compilation — UI only
+
+Reports must be compiled via EREP → Prepare (הכנה) in the Priority UI. WebSDK cannot compile reports (no `prepareReport` op exists). After REPCLMNS or REPCLMNSA changes via WebSDK, the developer or automation must trigger Prepare through the UI.
+
+### HTMLCURSOR controls which steps render
+
+New steps in cloned HTMLDOC procedures produce no visible output unless HTMLCURSOR is configured to include them. HTMLCURSOR is the cursor that iterates the parent record set and invokes downstream steps per-record.
+
+When a new SQLI step appears to be skipped despite being in PROGFORMATS and compiling cleanly, inspect HTMLCURSOR's step reference on the parent procedure — steps outside its cursor scope silently don't fire.
+
 ---
 
 ## Run Reports

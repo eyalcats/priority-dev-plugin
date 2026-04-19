@@ -634,4 +634,52 @@ ESTATUSDES (CHAR,16,'Status in Lang 2')
 MANAGERREPOUT (CHAR,1,'Omit from Reports')
 AUTOUNIQUE (ORDSTATUS)
 UNIQUE (ORDSTATUSDES);
+
+## DBI pitfalls
+
+Behaviours that have cost past sessions hours of debugging. Treat as the current contract.
+
+### Column spec uses parentheses, not SQL-standard syntax
+
+Priority DBI columns use `COL (TYPE, WIDTH, 'title')` — parentheses wrap the whole triple. SQL-standard forms fail:
+
+```
+/* Wrong — fails parse */
+MYCOL CHAR(1) NOT NULL,
+
+/* Right */
+MYCOL (CHAR, 1, 'My Column')
+```
+
+### `TIME` width minimum
+
+`TIME` column width must be ≥ 5 (typically 6). Width 4 fails at DBI-parse time.
+
+### `REFRESH` is reserved
+
+`REFRESH` cannot be used as a column name — DBI rejects it. Rename (e.g., `DOREFRESH`, `REFRESHFLAG`).
+
+### Column title hard cap at 20 characters
+
+`FOR TABLE … INSERT` silently truncates or rejects titles longer than 20 characters. For longer titles, either abbreviate in the DBI spec or set the full title via a subsequent `FCLMN.COLTITLE` update.
+
+### `AUTOUNIQUE` requires a paired `UNIQUE` key, or use trigger-based alternative
+
+`AUTOUNIQUE` standalone in `CREATE TABLE` is invalid — it must appear alongside a `UNIQUE` key (typically `AUTOUNIQUE (col1) UNIQUE (col2);`).
+
+Alternative: plain `UNIQUE (col)` + form-level `FCLMN SUM='U'` to get auto-increment behaviour. `FCLMN.SUM` is not exposed via WebSDK; set it via a PRE-INSERT trigger instead: `SELECT NVL(MAX(KLINE),0)+1 INTO :$.KLINE FROM <table>;`.
+
+Adding `AUTOUNIQUE` via DBI on an existing populated table can corrupt existing rows. Only safe on fresh tables.
+
+### `CREATE TABLE` vs `ADD TABLE`
+
+Use `CREATE TABLE … UNIQUE(…);`. `ADD TABLE` is not valid Priority DBI syntax.
+
+### Autonomous DBI workflow
+
+For DBI execution, call `run_inline_sqli(mode="dbi")` directly. No `.pq` file needed. The active-editor quirk that affects `runSqliFile`/`executeDbi` (see `websdk-cookbook.md` § "Known bridge behaviors") does NOT affect `run_inline_sqli`.
+
+### Custom columns on system tables — manual UPGNOTES DBI entry required
+
+Columns added to system tables via `run_inline_sqli(mode="dbi")` bypass Priority's change tracking, so `TAKEUPGRADE` does not auto-generate DBI for them. See `deployment.md` § "DBI in UPGNOTES for system-table columns" for the upgrade-shell recipe.
 ```

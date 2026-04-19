@@ -939,3 +939,38 @@ When creating custom help for specific fields or forms, you can use the standard
 2. Flag the `TAKEENTHEADER` step for inclusion
 3. Enter `S` in the Designed Form field at upper level
 4. Prepare the revision
+
+## 11. Known trigger quirks
+
+Behaviors that have burned past development sessions. Treat these as the current contract.
+
+### Standard trigger slots exist implicitly on every form
+
+Form-level slots (PRE-INSERT, POST-INSERT, CHECK-FIELD, etc.) do not need to be "created" before writing code. Call `write_to_editor` directly with the slot's SQLI content — the bridge creates the slot row if it does not yet exist.
+
+### Column-level triggers on system columns are blocked
+
+Cannot add a column-level trigger to a system column via WebSDK or `write_to_editor` — the system rejects the insert on FORMCLTRIG. Workaround: form-level POST-UPDATE trigger guarded to be idempotent, typically by checking the column's changed-flag variable or comparing OLD/NEW values via a PRE-UPDATE `SELECT … INTO` snapshot.
+
+### SQLI trigger syntax gotchas
+
+- **No inline `MOD` or `NVL` in expressions.** Use `SELECT` with these functions into a variable first.
+- **Variable name `:G1` collides with PREPALLKPI.** Rename project-wide; do not reuse.
+- **No conditional assignment with `WHERE`.** Use `IF … THEN … ELSE`; SQLI does not accept `LET :VAR = X WHERE …` syntax.
+- **Email validation:** use `:EMAIL LIKE '%@%.%'`, not `STRIND(:EMAIL, '@') > 0`. `STRIND` on NULL is undefined behaviour on some server builds.
+- **`PRANDOM`** requires an `EXECUTE` with a `.pq` file — cannot be called inline in a trigger.
+- **Adding `AUTOUNIQUE` via DBI on an existing populated table can corrupt rows.** Only safe on fresh tables. For adding auto-increment to a populated table, use a PRE-INSERT trigger: `SELECT NVL(MAX(KLINE),0)+1 INTO :$.KLINE FROM <table>;`.
+
+### Column trigger code — use DBI, not WebSDK `newRow`
+
+`write_to_editor` returns `TRIGGER_NOT_FOUND` for column-level triggers, and WebSDK `newRow` on FORMCLTRIGTEXT silently appends. See `forms.md` § "Column trigger code — use DBI, not WebSDK `newRow`" for the DELETE+INSERT pattern.
+
+### Reading WebSDK trigger messages
+
+After a `saveRow` or `fieldUpdate`, inspect `result.warning`, `result.info`, `result.error`. These capture WRNMSG / PRINT / ERRMSG fired by triggers during the op.
+
+Hebrew error `ערך קיים במסך 'X'` names the blocking subform — peel FORMEXEC → FLINK → FTRIG → FCLMN → EFORM to find the guard, rather than guessing SQL `DELETE`s to clear the "already exists" state.
+
+### FORMPREPERRS accumulates stale errors
+
+FORMPREPERRS is readable via WebSDK but entries accumulate across compile attempts. "Could not read ERRMSGS" reports the same whether the current compile succeeded or failed. Authoritative compile-success signal is the bridge's `prepareForm` status + a post-compile `getRows` on the form itself, not FORMPREPERRS content.

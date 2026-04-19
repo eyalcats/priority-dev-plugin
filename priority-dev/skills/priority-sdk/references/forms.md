@@ -50,6 +50,7 @@
   - [Global Variables in Forms](#global-variables-in-forms)
   - [The DUMMY Table](#the-dummy-table)
   - [Text Form Variables](#text-form-variables)
+- [9. Managing forms and columns via WebSDK](#9-managing-forms-and-columns-via-websdk)
 
 ---
 
@@ -208,8 +209,11 @@ Use the `CREDITBAL` system constant to control whether debit or credit balances 
 A Boolean column must be:
 - CHAR type
 - Width of 1
+- `FCLMN.BOOLEAN='Y'` — the web client reads this flag to render a checkbox. Without it, the column renders as a plain single-character text input.
 
 When flagged: table value = `Y`. When blank: table value = `\0`.
+
+When managing columns via WebSDK, set `BOOLEAN` alongside the other FCLMN fields on `saveRow` — omitting it produces a text input despite CHAR(1).
 
 ### Keyword Columns
 
@@ -812,3 +816,121 @@ SELECT 0 + :$.TQUANT INTO :TQUANT FROM DUMMY;
 | `:$.READONLY.T = 1` | Makes text form read-only based on upper-level status |
 | `:$.NOEDITOR.T = 1` | Prevents non-HTML text editor |
 | `:$.NOHTML.T = 1` | Creates plain text form |
+
+## 9. Managing forms and columns via WebSDK
+
+All form metadata changes flow through `websdk_form_action` on EFORM with filter + subform navigation. Never use raw table `INSERT`/`UPDATE` on FORMCLMNS, FORMCLMNSA, FTRIG, etc. — raw SQL bypasses EFORM's own validation and leaves the form uncompilable.
+
+For the operation property reference, subform-name rules, and filter semantics, see `websdk-cookbook.md`. This section focuses on the recipes specific to columns, expressions, and subforms.
+
+### Reading columns
+
+```
+filter(ENAME, "FORMNAME") → getRows → setActiveRow(1) → startSubForm(FCLMN) → setActiveRow(1) → getRows
+```
+
+`getRows` on an EFORM subform returns `{}` before `setActiveRow(1)`. Always activate before reading.
+
+For bulk metadata (all columns across many forms), prefer SQLI on `FORMCLMNS` directly — `getRows` via WebSDK on EFORM subforms is optimised for single-row flows.
+
+### Adding a column
+
+```
+filter EFORM (ENAME, "FORMNAME")
+  → getRows → setActiveRow(1)
+  → startSubForm(FCLMN)
+  → newRow
+  → fieldUpdate(NAME, "COLNAME")
+  → fieldUpdate(CNAME, "COLNAME")
+  → fieldUpdate(TNAME, "TABLENAME")
+  → fieldUpdate(POS, "500")
+  → fieldUpdate(HIDEBOOL, "N")
+  → fieldUpdate(IDCOLUMNE, "6")   // for private dev on system forms
+  → saveRow
+```
+
+Custom columns on system forms require `IDCOLUMNE > 5` (project rule; `IDCOLUMNE = 0` is reserved for system columns).
+
+### Deleting a column
+
+```
+filter EFORM → startSubForm(FCLMN)
+  → filter(NAME, "COLNAME")
+  → getRows (confirm count > 0 before proceeding)
+  → setActiveRow
+  → deleteRow
+```
+
+### Setting a column expression
+
+```
+FCLMN → filter(NAME, "COLNAME") → setActiveRow
+  → startSubForm(FCLMNA)
+  → newRow
+  → fieldUpdate(EXPR, "<expression>")
+  → saveRow
+```
+
+For expressions longer than ~80 characters, continue via `FCLMNA → setActiveRow → startSubForm(FCLMNTEXT) → newRow → fieldUpdate(TEXT, "…") → saveRow`.
+
+**Expression scalar-only:** `FCLMNA.EXPR` rejects scalar subqueries. `(SELECT … WHERE …)` fails with `parse error at or near symbol SELECT`. Use a real join (imported column) or a POST-UPDATE trigger.
+
+**Cross-instance references:** when `IDCOLUMNE > 0`, `:$.COLUMN` only sees columns in the same instance. Use `TABLE.COLUMN` to reference system columns (instance 0) or joined-table columns.
+
+### FCLMNA.COND (conditional visibility) is NOT reachable via WebSDK
+
+`FCLMNA.COND` is the field that controls conditional column visibility in the UI. It is not exposed through any WebSDK op. Workarounds:
+
+1. **POST-FIELD trigger** on the triggering column that sets `:$.TARGETCOL.SHOW = 0/1`.
+2. **Direct SQLI** `UPDATE` on `FORMCLMNSA` — only for dev-server setup, not runtime logic, and only with explicit user approval per the "form interface over raw UPDATE" rule.
+
+### Creating a root form on a custom-prefix table (raw EFORM `newRow`)
+
+Raw `newRow` on EFORM works for flat forms whose base table uses a custom prefix (`SOF_`, `ASTR_`, etc.). FCLMN auto-seeds from TNAME and the form compiles clean.
+
+```
+filter EFORM (ENAME, <new form name>)  // confirm 0 matches
+  → newRow
+  → fieldUpdate(ENAME, "SOF_MYFORM")
+  → fieldUpdate(TITLE, "My Form")
+  → fieldUpdate(TNAME, "SOF_MYTABLE")
+  → fieldUpdate(EDES, "SOF")
+  → fieldUpdate(MODULENAME, "פיתוח פרטי")
+  → saveRow
+```
+
+Raw `newRow` is NOT safe for forms over system tables — those still require the UI-driven "New form" path (the form generator fills in system-column metadata that raw WebSDK does not reproduce).
+
+### Creating a subform and linking it to a parent
+
+FLINK rows have no parent-key/child-key fields. The join lives on the subform's own `FCLMN.EXPRESSION=Y` + `FCLMNA.EXPR=':$$.PARENTPK'`.
+
+1. Create the subform root (same pattern as "Creating a root form" above, using the child table).
+2. Add a key column on the subform with `EXPRESSION='Y'` and `FCLMNA.EXPR=':$$.<parent primary key>'`.
+3. On the parent form, `startSubForm(FLINK) → newRow → fieldUpdate(SUBFORMNAME, "<subform ENAME>") → saveRow`.
+4. Compile the subform first, then the parent.
+
+For the canonical 6-call text-subform recipe, see `websdk-cookbook.md` § "Recipe: Text Subform Creation".
+
+### Column trigger code — use DBI, not WebSDK `newRow`
+
+`write_to_editor` returns `TRIGGER_NOT_FOUND` for column-level triggers. WebSDK `newRow` on FORMCLTRIGTEXT silently appends (produces duplicate lines that Priority parses as broken SQL at runtime).
+
+Correct workflow:
+
+```sql
+/* Run via run_inline_sqli(mode="dbi") */
+DELETE FROM FORMCLTRIGTEXT
+  WHERE IDFORM = :IDFORM
+    AND IDCOLUMN = :IDCOLUMN
+    AND TRIGTYPE = '<type>';
+
+INSERT INTO FORMCLTRIGTEXT (IDFORM, IDCOLUMN, TRIGTYPE, SEQ, TEXT)
+VALUES (:IDFORM, :IDCOLUMN, '<type>', 1, '<line 1>'), …;
+```
+
+See `websdk-cookbook.md` § "Known bridge behaviors" for why.
+
+### `filter` primitive — always `getRows` before `setActiveRow`
+
+Without an intermediate `getRows`, writes after `filter` land on the wrong parent (EFORM's own meta-form). Use primitives explicitly; avoid the compound `createTrigger`, which has the same bug.

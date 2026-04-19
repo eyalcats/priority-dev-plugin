@@ -86,6 +86,48 @@ WebSDK uses bare subform names. The `_SUBFORM` suffix is an OData URL convention
 
 ---
 
+## Known bridge behaviors
+
+Internal details of how the VSCode bridge implements WebSDK calls. These are failure modes of the bridge itself, not of the Priority WebSDK — treat them as the current contract.
+
+### `filter` primitive — `setSearchFilter` + `QueryValues`
+
+The bridge's `filter` primitive calls `setSearchFilter` with the `QueryValues` format. `setSearch` does not exist in the WebSDK.
+
+```js
+{
+  or: 0,
+  ignorecase: 1,
+  QueryValues: [
+    { field, fromval, toval: '', op: '=', sort: 0, isdesc: 0 }
+  ]
+}
+```
+
+The compound tool requires `getRows` between `filter` and `setActiveRow` so the SDK materialises the row count. Without it, writes land on the wrong parent (EFORM's own meta-form). Use primitives (`filter` → `getRows` → `setActiveRow` → `startSubForm` …), not the compound `createTrigger`.
+
+### `runSqliFile` / `executeDbi` run the active editor tab
+
+Both operations run whichever file is active in the VSCode editor, regardless of the `entityName` argument. `entityName` is logging only. If the bridge writes a `.pq` file via `Write` or `Edit`, VSCode may not reload from disk and the stale content runs.
+
+Prefer `run_inline_sqli` (direct WCF, no active-editor dependency) for all SQLI and DBI snippets.
+
+### `newRow` on FORMCLTRIGTEXT (and other deeply nested subforms) silently appends
+
+`newRow` on FORMCLTRIGTEXT does not replace existing rows — it appends. Rewriting a column trigger via repeated `newRow` produces duplicate lines that Priority concatenates at runtime and silently skips as broken SQL. `getRows` on FORMCLTRIGTEXT often returns `{}` even when rows exist.
+
+For rewrites, use DBI `DELETE + INSERT` via `run_inline_sqli(mode="dbi")`. See the text-subform recipe (Call 5) for the canonical pattern.
+
+### `FCLMNA.EXPR` is scalar-only
+
+`FCLMNA.EXPR` does not accept scalar subqueries. `(SELECT … WHERE …)` fails with `parse error at or near symbol SELECT`. Use a real join (imported column from joined table) or a POST-UPDATE trigger that assigns the computed value.
+
+### FORMPREPERRS accumulates stale errors
+
+FORMPREPERRS exists and can be read via WebSDK, but entries accumulate across compile attempts. "Could not read ERRMSGS" reports the same way whether the current compile succeeded or failed. Authoritative signal is the bridge's `prepareForm` status + a `getRows` on the form itself, not FORMPREPERRS content. See the detailed pitfall at `FORMPREPERRS accumulates stale errors across compile attempts` below.
+
+---
+
 ## Common Mistakes
 
 | Mistake | Symptom | Fix |
@@ -101,6 +143,45 @@ WebSDK uses bare subform names. The `_SUBFORM` suffix is an OData URL convention
 | Using `IDCOLUMNE` in SQLI queries | "Unresolved identifier" | Real column is `IDCOLUMN` |
 | `getRows` without `fromRow` on root form | Returns 0 rows | Always `filter` before `getRows` on root forms. `getRows(1)` is default after fix. |
 | `filter` without later `setActiveRow(1)` | Subform operations fail | Always `setActiveRow(1)` after `filter` before navigating |
+| `fieldUpdate(IDJOINE, "10")` or higher | `סמן מספר מ-0 עד 9 ובנוסף אפשרי ? או !` | IDJOINE accepts ONLY 0–9 (plus `?` and `!`). Old memory claim of "0–99" was wrong. Re-use numbers across different JTNAMEs if needed — IDJOINE only disambiguates when the same target table appears multiple times |
+| `fieldUpdate(JTNAME, "USERSLOGIN")` | `ערך 'USERSLOGIN' לא קיים בעמודה 'טבלת חיתוך'` | Not every plausible table name is a valid JTNAME on every server. Use `EFORM filter(TITLE, "user%", LIKE)` to discover real names, or skip the join and stamp the column from `SQL.USER` in a trigger |
+| `fieldUpdate(SUM, "U")` | `Can't find column: SUM` | `SUM` is a FCLMN metadata field not exposed via WebSDK. For autounique, use a PRE-INSERT trigger: `SELECT NVL(MAX(KLINE),0)+1 INTO :$.KLINE FROM <table>;` |
+
+---
+
+## Reading WebSDK errors as step-by-step guidance
+
+Priority's Hebrew error messages follow a strict schema — read them literally, they tell you exactly what's blocking and how to unblock:
+
+| Hebrew message | Translation | What to do |
+|---|---|---|
+| `ערך קיים במסך 'X'` | "Value exists in form 'X'" | That subform contains rows blocking the current op. Open the subform on the parent EFORM row and deleteRow the blockers (do NOT guess table names for SQL DELETE) |
+| `ערך 'Y' לא קיים בעמודה 'Z'` | "Value Y doesn't exist in column Z" | The lookup value you wrote isn't in the dictionary. Use a valid value or remove the reference |
+| `סמן מספר מ-0 עד 9 ובנוסף אפשרי ? או !` | "Mark number 0-9, also ? or ! allowed" | The numeric field is constrained to 0–9 |
+| `משתנה :$.X בהפעלה Y/ACTION אינו קיים כעמודה במסך` | ":$.X doesn't exist as a column in the form, during Y/ACTION activation" | Some activation references column X which doesn't exist on the form. Either add X, or remove the reference (often in orphan FTRIG/FTRIGTEXT from an abandoned compile) |
+| `המסך לא מוכן. להכנת מסך, הפעל את "הכנת מסכים"` | "Form not prepared" | Run `priority.prepareForm` on this form name before any read/write |
+
+### Hebrew subform aliases (what "form X" in the error maps to)
+
+| Hebrew | WebSDK subform | Owns |
+|---|---|---|
+| עמודות המסך | `FCLMN` | form column metadata |
+| מסכי בן | `FLINK` | subform links |
+| הפעלות המסך | `FORMEXEC` | direct activations (buttons) |
+| הפעלות / טריגרים | `FTRIG` | form-level triggers |
+| טקסט הפעלה | `FTRIGTEXT` | trigger body lines |
+
+### Cleanly deleting a form via WebSDK (peel order)
+
+`EFORM deleteRow` refuses while child rows exist. Clear each blocker in order. Each failed delete's Hebrew error tells you which subform comes next:
+
+1. `FORMEXEC` — remove any direct activations on this form
+2. `FLINK` — remove subform links in both directions (FATFORM = this form AND SONFORM = this form)
+3. `FTRIG` — remove form-level triggers (cascades to FTRIGTEXT automatically)
+4. `FCLMN` — remove columns (cascades to FCLMNA/FCLMNTEXT/FORMCLTRIG)
+5. `EFORM` → `deleteRow` on the root form row
+
+If listing via `getRows` returns `{}` (known EFORM-subform bridge quirk), either iterate by filtering on discriminator values you know (e.g., `filter(FNAME, "...")` on FLINK) or delegate to the Priority UI — one "Delete Form" click handles the whole cascade, including parts WebSDK can't enumerate (especially orphan FTRIGTEXT from abandoned compiles).
 
 ---
 
@@ -375,7 +456,7 @@ Known failures where the UI Form Generator is still required:
 
 ### Create a subform + link it to a parent
 
-Subform creation is a **four-step sequence**. FLINK has no parent-key / child-key fields — the join lives on the subform's FCLMN expression.
+Subform creation is a **four-step sequence**. FLINK has no parent-key / child-key fields — Priority binds parent↔child by column name convention + FLINK metadata, without any explicit expression on the subform's link column.
 
 ```text
 /* 1. Create the subform on EFORM — same as root-form creation above */
@@ -384,17 +465,13 @@ EFORM → newRow
 saveRow
 /* FCLMN auto-seeds all columns of SOF_MYSUB */
 
-/* 2. Mark the subform's parent-link column (the FK to the parent) */
+/* 2. Hide the parent-link column (the FK to the parent). Nothing else. */
 EFORM → filter(ENAME, SOF_MYSUB) → setActiveRow(1)
 startSubForm(FCLMN)
 filter(NAME, PARENTKEY) → setActiveRow(1)
-fieldUpdate(HIDEBOOL,   Y)
-fieldUpdate(EXPRESSION, Y)
+fieldUpdate(HIDEBOOL, Y)   /* may already be Y from auto-seed — idempotent */
 saveRow
-startSubForm(FCLMNA)
-newRow
-fieldUpdate(EXPR, ':$$.PARENTPK')   /* :$$. reaches into the PARENT form */
-saveRow
+/* DO NOT set EXPRESSION=Y. DO NOT add any FCLMNA row. See pitfall below. */
 
 /* 3. Wire FLINK on the PARENT form */
 EFORM → filter(ENAME, SOF_PARENT) → setActiveRow(1)
@@ -406,12 +483,60 @@ fieldUpdate(APOS,       10)            /* display order */
 fieldUpdate(MODULENAME, 'פיתוח פרטי')
 saveRow
 
-/* 4. Compile both */
+/* 4. Compile both — raw EFORM newRow does NOT auto-compile */
 run_windbi_command  priority.prepareForm  SOF_MYSUB
 run_windbi_command  priority.prepareForm  SOF_PARENT
 ```
 
-**Key fact:** FLINK rows carry only `FNAME / TITLE / APOS / MODULENAME`. No parent-key / child-key columns. The key mapping is established by the subform's FCLMN.EXPRESSION=Y + FCLMNA.EXPR=':$$.PARENTPK' — Priority resolves the relationship at compile time.
+**Key fact:** FLINK rows carry only `FNAME / TITLE / APOS / MODULENAME`. No parent-key / child-key columns are exposed. Priority still binds the two forms correctly — the mechanism lives in FLINK internals, not in anything we set.
+
+### ⚠ Pitfall: `FCLMNA.EXPR = ':$$.PARENTPK'` breaks the parent's compile (verified 2026-04-18)
+
+An earlier version of this cookbook (and the old `reference_subform_creation_via_websdk.md` memory) prescribed putting `EXPRESSION=Y` on the subform's link column and a FCLMNA row with `EXPR=':$$.PARENTPK'`. **This is wrong.** When the PARENT form compiles, Priority flattens `:$$.PARENTPK` to `:$.PARENTPK` while resolving cross-form activations (the `<PARENT>/DELETE` activation) and then tries to resolve `PARENTPK` as a real column on the parent — which doesn't exist. Result:
+
+```
+:$.PARENTPK אינו קיים כעמודה במסך בהפעלה <PARENT>/DELETE
+(":$.PARENTPK does not exist as a column in the form, during <PARENT>/DELETE activation")
+```
+
+The parent's compile fails, which in turn cascades because `ERRMSGS` can't be read by the bridge (see next section). If you already added the orphan FCLMNA row, delete it via raw SQLI before recompiling:
+
+```sql
+DELETE FROM FORMCLMNSA WHERE NAME = 'PARENTKEY' AND EXPR = ':$$.PARENTPK';
+```
+
+(Run in SQLI mode — `DELETE` is rejected in DBI mode.)
+
+### ⚠ Raw EFORM `newRow` does NOT auto-compile (verified 2026-04-18)
+
+After `newRow/saveRow` on EFORM, the form exists in metadata but is NOT prepared. Any WebSDK attempt to open it fails with `המסך לא מוכן. להכנת מסך, הפעל את "הכנת מסכים"` ("Form not prepared. To prepare, activate 'Form Preparation'."). You MUST explicitly run `run_windbi_command priority.prepareForm entityName=<FORM>`. This applies to root forms AND subforms, every time.
+
+### ⚠ Bridge can't read compile errors when `ERRMSGS` itself isn't prepared
+
+The bridge's `priority.prepareForm` surfaces errors by reading the session-scoped `ERRMSGS` form. If `ERRMSGS` hasn't been prepared on the server, the bridge returns a misleading:
+
+```
+Compile failed, could not read ERRMSGS: אין מסך בשם זה
+```
+
+This is ambiguous — it could be:
+- **A real compile failure** with unreadable details, OR
+- **A successful compile** whose reporting channel is broken.
+
+**Distinguish** by running `getRows` on the target form afterward in a separate call:
+- Form opens → compile actually succeeded; ignore the "failure" message.
+- Form returns `המסך לא מוכן` → compile really failed; need to see the text another way.
+
+### ⚠ FORMPREPERRS accumulates stale errors across compile attempts
+
+If you try to read errors directly via `websdk_form_action FORMPREPERRS getRows`, be aware that entries can be LEFT OVER from a previous compile — it is NOT freshly reset per call. Stale entries can show line numbers or variable names that don't match your current buffer (e.g. `parse error at line 4` when your line 4 has no syntactic issue, or `:$.SIGNUSER Incompatible data types` from an earlier failed compile).
+
+**Authoritative signal sequence:**
+1. Use the bridge's `status` field on `priority.prepareForm` response. `"compiled successfully"` = real success, ignore any FORMPREPERRS contents.
+2. If the bridge reports ambiguous failure, test by opening the form via `getRows` — form opens = actually succeeded.
+3. Only after confirming a real failure do you look at FORMPREPERRS. Cross-check each entry's line numbers and referenced variables against the CURRENT buffer. If they don't match, they're stale — don't chase them.
+
+When the bridge's compound-op `FORMPREPERRS` fix is installed (patch in `bridge/src/websdk/compounds.ts` uses `FORMPREPERRS` form instead of broken `ERRMSGS` table lookup), this ambiguity goes away and the `status` + inline error text become definitive. Until then, belt-and-suspenders: trust the bridge's status, verify by opening the form.
 
 ### FCLMNA gap: conditional visibility (COND) not reachable via WebSDK
 

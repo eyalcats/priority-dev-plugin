@@ -452,3 +452,39 @@ When run as Action, the form record on which the cursor rests is input into the 
 ### Run a Sub-Procedure
 
 Include a procedure as part of another via the **Procedure Link** form (sub-level of Procedure Generator). This is useful for reusing step sets across procedures.
+
+## Direct activations
+
+A direct activation is a procedure invoked as an Action from a form. The form's FORMEXEC subform holds the link; the target procedure runs against the form's current row.
+
+For how to add a direct activation via the FORMEXEC subform and for the UPGCODE that deploys it (`TAKEDIRECTACT`), see `deployment.md` § "FORMEXEC subform for direct activations".
+
+### The procedure receives `:$.PAR`, not `:$.COL`
+
+A directly activated procedure gets the linked file reference via `:$.PAR`. It does **not** see the form's column values through `:$.COL` — direct activations run in a procedure context, not a form trigger context.
+
+To read data from the form's current row, use the LINK pattern below.
+
+### Canonical pattern — LINK + SELECT + UNLINK + INSERT
+
+```sql
+LINK CINVOICES TO :$.PAR;
+SELECT IV, CUSTNAME, CURDATE
+  INTO :IV, :CUSTNAME, :DATE
+  FROM CINVOICES
+  WHERE CINVOICES.IV = CINVOICES.IV;   /* LINK narrows to the activated row */
+UNLINK CINVOICES;
+
+INSERT INTO SOF_ACTIVITYLOG (IV, CUSTNAME, DATE, USER)
+VALUES (:IV, :CUSTNAME, :DATE, SQL.USER);
+```
+
+Always check `SQL.RETVAL` (or use explicit `ERRMSG`/`WRNMSG`) after LINK and INSERT. LINK failures are silent otherwise.
+
+### `EXECUTE INTERFACE` in a direct-activation context loses GL values on custom tables
+
+When a directly activated procedure calls `EXECUTE INTERFACE '…', SQL.TMPFILE` targeting a custom (non-system) table, GENERALLOAD values populated before the EXECUTE can be silently dropped. The interface runs but the target custom table ends up with NULLs.
+
+Workaround: use the direct `INSERT` pattern above instead of `EXECUTE INTERFACE` for custom-table targets inside direct activations. For system tables, `EXECUTE INTERFACE` continues to work as expected.
+
+This is observed on custom tables specifically; system tables are unaffected. Verify against a live test before trusting it outside the observed case.

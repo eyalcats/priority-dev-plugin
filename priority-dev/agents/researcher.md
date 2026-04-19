@@ -68,14 +68,16 @@ You operate in one of two modes depending on the invoker's request:
 
 ## Workflow
 
-1. Open EFORM via websdk_form_action, filter by form name (exact: `{"op":"filter","field":"ENAME","value":"FORMNAME"}`, or fuzzy: `{"op":"filter","field":"ENAME","value":"%ORDER%","operator":"LIKE"}`)
-2. Read base form fields (ENAME, TITLE, TNAME, EDES, TYPE)
-3. Open FCLMN_SUBFORM — read all columns
-4. For each column with expressions, open FCLMNA_SUBFORM
-5. Open FTRIG_SUBFORM — list all triggers
-6. Open FLINK_SUBFORM — list subform links
-7. Open FORMEXEC subform — list direct activations
-8. Use run_windbi_command to get base table structure
+1. Open EFORM via `websdk_form_action`, filter by form name — exact: `{"op":"filter","field":"ENAME","value":"FORMNAME"}`; fuzzy: `{"op":"filter","field":"ENAME","value":"%ORDER%","operator":"LIKE"}`.
+2. Read base form fields (ENAME, TITLE, TNAME, EDES, TYPE).
+3. `setActiveRow(1)` → `startSubForm(FCLMN)` → `setActiveRow(1)` → `getRows` — read all columns. (Plain `getRows` on a subform returns `{}` before `setActiveRow(1)`.)
+4. For each column with expressions: `setActiveRow` on it → `startSubForm(FCLMNA)` → `setActiveRow(1)` → `getRows`.
+5. `startSubForm(FTRIG)` → list all form-level triggers.
+6. `startSubForm(FLINK)` → list subform links.
+7. `startSubForm(FORMEXEC)` → list direct activations.
+8. `run_windbi_command displayTableColumns entityName=<base table>` for base table structure.
+
+Subform names are bare — `FCLMN`, not `FCLMN_SUBFORM`. The `_SUBFORM` suffix is an OData URL convention and fails under WebSDK.
 
 ## Procedure & Report Research
 

@@ -129,9 +129,11 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 | **`references/forms.md`** | Form creation, all column types, joins, sub-level forms, conditions, text forms, SQL variables |
 | **`references/triggers.md`** | All trigger types with examples, ERRMSG/WRNMSG, MAILMSG, INCLUDE/buffers, form preparation |
 | **`references/reports.md`** | Report creation, columns, sorting/grouping, calculated columns, CSS styling, report types |
-| **`references/procedures.md`** | Procedure steps, parameters, user input methods, step queries, flow control, PRINT messages |
+| **`references/procedures.md`** | Procedure steps, parameters, user input methods, step queries, flow control, PRINT messages, direct activations (`:$.PAR`, LINK/UNLINK/INSERT) |
 | **`references/documents.md`** | Document generation, WINHTML program (direct/quick syntax), all parameters, print formats |
-| **`references/interfaces.md`** | Form loads (INTERFACE), table loads (DBLOAD), GENERALLOAD, XML/JSON, dynamic interfaces, STACKERR, ODBC Driver |
+| **`references/interfaces.md`** | Form loads (INTERFACE), table loads (DBLOAD), GENERALLOAD, XML/JSON, dynamic interfaces, STACKERR, ODBC Driver, EDI form-load internals (INTERFORMS → FORMCLTRIG, INTERCLMNSFILE → FORMCLMNS) |
+| **`references/deployment.md`** | Upgrade shells: UPGCODE decision (TAKETRIG/TAKEFORMCOL/TAKEPROCSTEP/etc.), TAKEUPGRADE / DOWNLOADUPG / INSTITLE, DBI in UPGNOTES for system-table columns, programmatic revision via WebSDK |
+| **`references/common-mistakes.md`** | Flat "symptom → wrong approach → right approach → see" catalog of anti-patterns historically made by the LLM; use as fast "why isn't X working" lookup |
 
 ### Advanced Topics
 
@@ -204,6 +206,12 @@ Read `references/vscode-bridge-examples.md` > Scaffolding New Code section — u
 ### Inspect entity structure (dump, table columns) via Claude Code
 Read `references/vscode-bridge-examples.md` > Inspecting Entities section — uses `run_windbi_command` with `dumpForm`, `displayTableColumns`, etc.
 
+### Generate an upgrade shell / pick the right UPGCODE
+Read `references/deployment.md` > "Choosing the right UPGCODE", then use the `generate_shell` MCP tool. For custom columns on system tables, see "DBI in UPGNOTES for system-table columns".
+
+### Look up why something isn't working
+Read `references/common-mistakes.md` — fast anti-pattern catalog with pointers to the canonical reference for each symptom.
+
 ## Search Patterns
 
 To find specific content in reference files, search for these patterns:
@@ -234,6 +242,10 @@ To find specific content in reference files, search for these patterns:
 | Form metadata tables | `FORMCLMNS\|FORMTRIG\|FORMCLTRIGTEXT\|HIDEBOOL\|HIDE` | `references/websdk-cookbook.md` |
 | Text subform recipe (6-call) | `Text Subform Creation\|TEXTFORM\|EDES.*LOG\|FCLMNA.*EXPR` | `references/websdk-cookbook.md` |
 | Find form internal ID | `Find a form's internal ID\|EXEC FROM EXEC` | `references/websdk-cookbook.md` |
-| Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|generate_shell` | `references/debugging.md` |
+| Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|TAKEUPGRADE\|DOWNLOADUPG\|generate_shell` | `references/deployment.md` |
+| Direct activations | `FORMEXEC\|:\$\.PAR\|direct activation\|LINK.*TO.*:\$\.PAR` | `references/procedures.md`, `references/deployment.md` |
+| EDI internals | `INTERFORMS\|INTERCLMNSFILE\|EINTER\|INTERFACE.*-form` | `references/interfaces.md` |
+| Known bridge behaviors | `QueryValues\|setSearchFilter\|runSqliFile\|FORMCLTRIGTEXT.*append\|FCLMNA.*scalar` | `references/websdk-cookbook.md` |
+| Anti-patterns / why doesn't X work | `Wrong:\|Right:\|See:\|common mistake` | `references/common-mistakes.md` |
 | MCP tools | `priority-dev\|priority-gateway\|bridge` | `references/debugging.md`, `references/vscode-bridge-examples.md` |
 | Scaffold | `createFormTrigger\|createProcedureStep` | `references/vscode-bridge-examples.md` |

@@ -346,35 +346,7 @@ Server Buffered=0
 
 ### Choosing the Right UPGCODE (Decision Guide)
 
-**Use the most specific UPGCODE for each change. `TAKESINGLEENT` is a last resort — it captures the entire entity, which is overkill for small changes and dangerous on system forms.**
-
-| What changed | UPGCODE | entityType | Extra fields |
-|-------------|---------|------------|--------------|
-| Created a brand-new custom entity (form/proc/report) | `TAKESINGLEENT` | F/P/R | |
-| Modified a trigger on a form | `TAKETRIG` | F | `trigger` = trigger name |
-| Added/changed a column on a form | `TAKEFORMCOL` | F | `trigger` = column name |
-| Added/changed a subform link | `TAKEFORMLINK` | F | `sonEntity`, `sonType` |
-| Added/changed a direct activation | `TAKEDIRECTACT` | F | `sonEntity`, `sonType` (auto-adds companion `TAKESINGLEENT` for sonEntity) |
-| Added/changed a procedure step | `TAKEPROCSTEP` | P | `pos` = step position |
-| Added/changed a report column | `TAKEREPCOL` | R | `trigger` = column name |
-| Added/changed a procedure message | `TAKEPROCMSG` | P | |
-| Added/changed a trigger message | `TAKETRIGMSG` | F | |
-| Changed entity title/attributes only | `TAKEENTHEADER` | F/P/R | |
-| Schema change (CREATE TABLE, column adds) | `DBI` | | Write DBI in UPGNOTESTEXT |
-| Deleted a trigger | `DELTRIG` | F | `trigger` = trigger name |
-| Deleted a column | `DELFORMCOL` | F | `trigger` = column name |
-| Deleted a subform link | `DELFORMLINK` | F | `sonEntity`, `sonType` |
-| Deleted a direct activation | `DELDIRECTACT` | F | |
-| Deleted a procedure step | `DELPROCSTEP` | P | `pos` |
-| Deleted a report column | `DELREPCOL` | R | |
-
-**Common mistakes:**
-- Using `TAKESINGLEENT` when only a trigger changed → captures the entire form including all columns, joins, expressions. On system forms this pulls system columns that may not exist on the target.
-- Using `TAKESINGLEENT` on a system form → **always** use `TAKEFORMCOL`/`TAKETRIG`/`TAKEFORMLINK` for specific changes to system forms.
-- Forgetting `TAKEDIRECTACT` needs a companion `TAKESINGLEENT` for the activated entity.
-- Forgetting DBI for custom columns on system tables (bypass change tracking).
-
-**Rule of thumb:** If you can describe the change in one line ("changed trigger X", "added column Y"), there's a specific UPGCODE for it. Only use `TAKESINGLEENT` when you created a brand-new entity from scratch.
+See `deployment.md` § "Choosing the right UPGCODE" for the canonical decision table and rationale. Summary: use the most specific UPGCODE per change (`TAKETRIG` for trigger changes, `TAKEFORMCOL` for column changes, etc.); `TAKESINGLEENT` only for brand-new entities.
 
 ### Programmatic Revision via WebSDK
 

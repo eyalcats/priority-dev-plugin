@@ -160,47 +160,17 @@ All form metadata operations work via WebSDK with `filter` + subform navigation:
 | Write trigger code | Use `write_to_editor(entityType="FORM", entityName, stepName, content)` |
 
 **Important WebSDK notes:**
-- `getRows(fromRow)` — parameter is starting row position (1-based), NOT a count
-- `filter` uses `setSearchFilter` — works on most forms including EFORM and UPGRADES
-- `clearFilter` clears the active filter
-- FORMEXEC: set `ETYPE` first ("P"/"F"/"R"), then `RUN` (entity name)
-- FTRIG: field name is `TRIGNAME` (not `NAME`)
-- Trigger code in FTRIGTEXT is stored one line per row (68-char RCHAR limit). For writing, use `write_to_editor` instead
-- **Column-level trigger code (FORMCLTRIG → FORMCLTRIGTEXT) has known quirks.** See the "Column trigger code" section below — `write_to_editor` returns TRIGGER_NOT_FOUND for column triggers, and WebSDK `newRow` on FORMCLTRIGTEXT may silently append duplicate rows when the trigger already has lines. Use the DBI fallback.
+- `getRows(fromRow)` — parameter is starting row position (1-based), NOT a count.
+- For `filter` internals and the compound-tool ordering requirement, see `websdk-cookbook.md` § "Known bridge behaviors".
+- `clearFilter` clears the active filter.
+- FORMEXEC: set `ETYPE` first ("P"/"F"/"R"), then `RUN` (entity name).
+- FTRIG: field name is `TRIGNAME` (not `NAME`).
+- Form-level trigger text (FTRIGTEXT) — use `write_to_editor`.
+- **Column-level trigger code** — `write_to_editor` returns `TRIGGER_NOT_FOUND`; WebSDK `newRow` on `FORMCLTRIGTEXT` silently appends. Use the DBI `DELETE + INSERT` recipe in `forms.md` § "Column trigger code — use DBI, not WebSDK `newRow`".
 
-#### Column trigger code (FORMCLTRIGTEXT) — DBI fallback
+#### TRIG value mapping (FORMCLTRIG / FORMCLTRIGTEXT)
 
-`write_to_editor` only handles form-level triggers (PRE-FORM, POST-UPDATE, etc.). Column-level triggers (CHECK-FIELD, POST-FIELD, CHOOSE-FIELD on a specific column) return `TRIGGER_NOT_FOUND`. For those, the first-choice path is WebSDK:
-
-```
-EFORM → FCLMN(column) → FORMCLTRIG → newRow(TRIGNAME) → saveRow
-       → FORMCLTRIGTEXT → newRow → fieldUpdate(TEXT, "line 1") → saveRow ...
-```
-
-**But WebSDK has silent-failure modes on FORMCLTRIGTEXT:**
-- `newRow` APPENDS, doesn't replace. Rewriting a trigger that already has lines produces duplicates — Priority concatenates them at runtime, parses as one broken SQL statement, and silently skips the trigger. Form still compiles clean because column trigger code is not parsed until runtime.
-- `getRows` on a deep subform may return `{}` even when rows exist, making verification via WebSDK unreliable.
-
-**Reliable fallback: write trigger lines directly via DBI** to the `FORMCLTRIGTEXT` table:
-
-```sql
-/* 1. Find the form ID (check via EFORM dump or this query) */
-SELECT FORM, TRIG, NAME, TEXTLINE, TEXT FROM FORMCLTRIGTEXT
-WHERE NAME = 'MY_COLUMN' ORDER BY TRIG, TEXTLINE FORMAT;
-
-/* 2. Wipe any existing lines (avoids the append bug) */
-DELETE FROM FORMCLTRIGTEXT
-WHERE FORM = <form_id> AND NAME = 'MY_COLUMN' AND TRIG = <trig_id>;
-
-/* 3. Insert fresh lines (one row per 68-char line) */
-INSERT INTO FORMCLTRIGTEXT (FORM, NAME, TRIG, TEXTLINE, TEXTORD, TEXT)
-VALUES (<form_id>, 'MY_COLUMN', <trig_id>, 1, 1, 'SELECT ... ');
-/* ...one INSERT per line... */
-```
-
-The `FORMCLTRIG` parent row (type declaration) still needs to exist — create it via WebSDK first (`FCLMN → FORMCLTRIG → newRow → fieldUpdate(TRIGNAME) → saveRow`). Only the TEXT lines go through DBI.
-
-**TRIG value mapping** (trigger type IDs in FORMCLTRIG/FORMCLTRIGTEXT, reverse-engineered 2026-04-10):
+Reference for raw SQL against the column-trigger tables:
 
 | TRIG | Trigger type |
 |------|--------------|
@@ -212,7 +182,7 @@ The `FORMCLTRIG` parent row (type declaration) still needs to exist — create i
 | 11 | POST-FIELD |
 | 12 | (tooltip / help text) |
 
-`FORMCLTRIGTEXT.NAME` is the **column name** (e.g., `FTIP_FCOUNTRY`), not the trigger name. `FORMCLTRIGTEXT.TRIG` is the trigger type from the table above. Primary key is `(FORM, NAME, TRIG, TEXTLINE)`.
+`FORMCLTRIGTEXT.NAME` is the **column name** (e.g., `FTIP_FCOUNTRY`), not the trigger name. Primary key is `(FORM, NAME, TRIG, TEXTLINE)`.
 
 #### Code Writing — Use write_to_editor
 
@@ -330,14 +300,11 @@ Running DBI as SQLI (or vice versa) produces parse errors — always pick the ri
 2. Run `run_windbi_command("priority.executeDbi")` — shows an input dialog auto-filled via clipboard
 3. Output renders in the WINDBI webview panel (not capturable)
 
-> **`runSqliFile` / `executeDbi` gotcha:** these commands execute the **currently active VSCode editor tab** regardless of the `entityName` argument passed to the MCP tool. `entityName` is only for logging. If you Write() or Edit() a `.pq` file after VSCode already opened it, VSCode may not reload it from disk and the stale content runs. Workarounds: (a) prefer `run_inline_sqli` which has no active-editor dependency; (b) use a fresh filename for each write so VSCode opens the new file; (c) ask the user to revert/reload the file.
+> For the active-editor quirk that affects `runSqliFile` / `executeDbi`, see `websdk-cookbook.md` § "Known bridge behaviors" → "`runSqliFile` / `executeDbi` run the active editor tab". Short version: prefer `run_inline_sqli`.
 
 ### Shell Generation Notes
 
-**TAKEDIRECTACT entries** require a companion TAKESINGLEENT for the `sonEntity` so the activated procedure exists on the target system. Always include both.
+See `deployment.md` for the full upgrade-shell workflow (UPGCODE choice, UPGNOTES rules, DOWNLOADUPG vs TAKEUPGRADE). The few bridge-specific notes:
 
-**TRANSLATED field** must be set to "N" on the UPGRADES revision for TAKEUPGRADE to run.
-
-**UPGNUM** is not autounique — must be set manually to MAX(UPGNUM)+1 when creating a revision.
-
-**Download files** come as UTF-16LE from Priority. The `downloadFile` operation handles conversion and saves as `.sh`.
+- **Download files** come as UTF-16LE from Priority. The `downloadFile` operation handles conversion and saves as `.sh`.
+- **`generate_shell` MCP tool** auto-adds the `TAKEDIRECTACT` → `TAKESINGLEENT` companion pair, handles `TRANSLATED='N'`, and computes `UPGNUM = MAX+1`. Prefer it over manual UPGNOTES construction.
