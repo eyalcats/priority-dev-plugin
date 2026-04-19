@@ -8,7 +8,7 @@
       "name": "priority-dev",
       "source": "./priority-dev",
       "description": "Priority ERP development tools for Claude Code — skill, agents, hooks, and bridge extension",
-      "version": "1.6.19"
+      "version": "1.6.20"
     }
   ]
 }
