@@ -301,6 +301,9 @@ When imported form columns come from the same table column, use **Join ID** and 
 
 **Important:** When creating custom multiple joins, use join ID and column ID **greater than 5**.
 
+> **Anti-pattern: colliding IDJOIN with an existing base-form join causes row-multiplication.**
+> If a private-dev imported column (`IDCOLUMN >= 5`) reuses the same `(IDJOIN, COLUMN)` pair as an already-present base-form row, Priority's compiler emits a defective join graph that cartesian-multiplies the form — symptom: filter on a single record returns N copies. Fix: use `IDJOIN >= 6` *and* `IDCOLUMN >= 6` for any custom instance of a column the base form already joins on. See `docs/solutions/database-issues/priority-form-row-duplication-astr-chain-2026-04-20.md`.
+
 #### Private Development on System Forms (IDCOLUMNE / IDJOINE)
 
 When adding custom columns (SOF_ prefix) to system forms that import from system tables (INVOICES, DOCTYPES, DOCUMENTS — internal table ID < 5):
@@ -574,13 +577,45 @@ When the user accesses an imported column, they can navigate to the target form.
 
 **Column name mismatch:** Enter both column names in the `ZOOMCOLUMNS` table (Source Column and Target Column).
 
-### Dynamic Access
+### Dynamic Access (ZOOM1 pattern)
 
-To vary the target form based on record data:
-1. Define a hidden form column named `ZOOM1`
-2. Specify `ZOOM1` as the target form in Form Column Extension
-3. `ZOOM1` holds the internal number (EXEC) of the target form for each record
-4. Initialize form variables in the PRE-FORM trigger
+To vary the target form based on record data.
+
+**Canonical reference form: `LOGFILE`** (shipped Priority inventory audit-trail form). Read its PRE-FORM trigger and its `ZOOM1` column's `FCLMNA.EXPR + FCLMNTEXT` continuation before designing a new dynamic zoom — it is the known-working template. Related examples that use the same pattern: `WTASKDOCS`, `DLVTRACKITEMS`.
+
+**Three parts, all required:**
+
+**1. Hidden `ZOOM1` form column**
+- `NAME=ZOOM1`, `EXPRESSION=Y`, `HIDEBOOL=Y`, type INT (width 13)
+- `FCLMNA.EXPR` is a **ternary that returns the target form's `EXEC` id per row**. Uses the `0 + :VAR` idiom to reference form-scoped variables initialized in PRE-FORM:
+
+    (SOURCE.TYPE = 'O' ? 0 + :ORDEXEC :
+     (SOURCE.TYPE = 'C' ? 0 + :CPROFEXEC :
+      (SOURCE.TYPE = 'I' ? 0 + :AINVEXEC :
+       (SOURCE.TYPE = 'D' ? 0 + :DOCDEXEC : 0))))
+
+- Expressions longer than 56 chars must be split: first chunk on `FCLMNA.EXPR`, remaining chunks as ordered rows on the `FCLMNTEXT` sub-subform (table `FORMCLMNSTEXT`). Priority concatenates them at compile time.
+
+**2. PRE-FORM trigger on the source form** initializes the form variables via `SELECT EXEC INTO :VAR FROM EXEC WHERE ENAME = '<form>' AND TYPE = 'F';` — one line per target form:
+
+    SELECT EXEC INTO :CPROFEXEC FROM EXEC WHERE ENAME = 'CPROF'       AND TYPE = 'F';
+    SELECT EXEC INTO :ORDEXEC   FROM EXEC WHERE ENAME = 'ORDERS'      AND TYPE = 'F';
+    SELECT EXEC INTO :AINVEXEC  FROM EXEC WHERE ENAME = 'AINVOICES'   AND TYPE = 'F';
+    SELECT EXEC INTO :DOCDEXEC  FROM EXEC WHERE ENAME = 'DOCUMENTS_D' AND TYPE = 'F';
+
+For target families that vary by sub-type (`DOCUMENTS_*`, `*INVOICES`), reference `DOCTYPES.EXEC` / `IVTYPES.EXEC` directly in the ternary via a joined-table path — this is the pattern LOGFILE uses for its document and invoice branches.
+
+**3. Displayed source column** carrying the visible doc-number value:
+- `FCLMNA.EXPR` = a simple reference or conditional returning the display string (e.g., `SOURCE.DOCNO`)
+- `FCLMNA.ENAME = "ZOOM1"` — the magic string that tells Priority "resolve the target form via the ZOOM1 column's computed value"
+- `FCLMN.TRIGGERS = Y` (match LOGFILE/WTASKDOCS; the flag gates the clickable zoom handler in Web client in some builds)
+
+**ZOOMCOLUMNS — when to add rows, and when NOT to:**
+
+- `ZOOMCOLUMNS` (`NAME`, `TONAME`, `POS`) is **global by column NAME** — no form scoping. A row applies to every form whose column is named `<NAME>`.
+- **If each target form's primary match column is its table's primary sort column** (`FCLMN.ORD > 0`, typically ORD=2 with ASCENDING=D — e.g. ORDERS.ORDNAME, CPROF.CPROFNUM, INVOICES.IVNUM, DOCUMENTS.DOCNO), **leave ZOOMCOLUMNS empty for your source column**. Priority falls back to the target form's primary ORD column automatically, which is the correct landing for these targets. Adding TONAMEs creates cross-target conflicts because the imported-column graph makes most TONAMEs match on most targets.
+- **Add ZOOMCOLUMNS rows only when the fallback doesn't land on the right column** (unusual — e.g., your source column name doesn't match any target column and the target's primary ORD column isn't what you want).
+- Priority's tie-break when multiple TONAMEs match a target is **pure POS ascending — NOT base-over-import**. If you must add rows and have shared-name imports (ORDNAME imported on almost every sales-adjacent form), expect the lowest-POS entry to win across all targets that import it.
 
 ---
 

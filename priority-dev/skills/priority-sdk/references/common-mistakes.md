@@ -44,6 +44,26 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Use a real join (imported column from joined table) or a POST-UPDATE trigger that assigns the computed value.
 - **See:** `forms.md` § "Managing forms and columns via WebSDK" → "Setting a column expression".
 
+### Using `||` for string concatenation in `FCLMNA.EXPR`
+- **Wrong:** `SOMETABLE.COL || ''` fails to compile — `||` is boolean OR in Priority expressions, not concat.
+- **Right:** Use ternary (`cond ? a : b`) with implicit concat inside branches, or `STRCAT` in a trigger.
+- **See:** `forms.md` § "Managing forms and columns via WebSDK".
+
+### Populating a stored base-table `ZOOM1` column via PRE-INSERT hardcodes
+- **Wrong:** `:$.ZOOM1 = 22` in PRE-INSERT only runs on insert, drifts if TYPE is edited, and hardcodes EXEC ids that can differ per tenant.
+- **Right:** Leave the base-table `ZOOM1` column unread. Use a ternary `FCLMNA.EXPR` on the hidden form `ZOOM1` column that dereferences PRE-FORM-initialized form variables (`0 + :ORDEXEC`, etc.). Initialize the variables via `SELECT EXEC INTO :VAR FROM EXEC WHERE ENAME = '<form>' AND TYPE = 'F'` in the PRE-FORM trigger.
+- **See:** `forms.md` § "Dynamic Access (ZOOM1 pattern)" and the live `LOGFILE` form.
+
+### Adding ZOOMCOLUMNS rows before checking if fallback works
+- **Wrong:** Adding `SOURCE → TARGET` rows for each intended target often causes the lowest-POS TONAME to win on every target form that imports it (e.g., ORDNAME at POS=1 wins on AINVOICES, CPROF, DOCUMENTS_D because they all import it via joins).
+- **Right:** If every target form's primary ORD column is the correct landing, delete all ZOOMCOLUMNS rows for your source — Priority's fallback picks each target's own primary ORD column. Only add rows when the fallback demonstrably goes to the wrong column and the mismatch is name-only.
+- **See:** `forms.md` § "Dynamic Access (ZOOM1 pattern)" → "ZOOMCOLUMNS — when to add rows, and when NOT to".
+
+### Debugging across tenants without verifying bridge connection
+- **Wrong:** Applying fixes via `websdk_form_action` while the user tests on a different Priority tenant — symptoms look identical to "the fix didn't work", but it was applied to the wrong DB.
+- **Right:** Read the trace line on every call: `[websdk] Logging in to url=... company=<X> tabulaini=... language=<N> user=<U>`. Cross-check with the user and confirm `priority.selectAllRowsFromTable` returns data matching what they see in their UI. Timestamp divergence (yesterday vs today) is a strong tenant-mismatch signal.
+- **See:** `forms.md` § "Dynamic Access (ZOOM1 pattern)" → tenant-mismatch note.
+
 ### `fieldUpdate(IDJOINE, "10")` or higher
 - **Wrong:** IDJOINE accepts only 0–9 (plus `?` and `!`). Older memory claim of 0–99 was wrong.
 - **Right:** Re-use IDJOINE values across different JTNAMEs if needed — IDJOINE only disambiguates when the same target table appears multiple times.
@@ -188,8 +208,17 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 
 ### Trusting FORMPREPERRS as authoritative compile status
 - **Wrong:** Entries accumulate across compile attempts; "Could not read ERRMSGS" reports the same whether current compile succeeded or failed.
-- **Right:** Use the bridge's `prepareForm` status + a post-compile `getRows` on the form itself.
-- **See:** `triggers.md` § "FORMPREPERRS accumulates stale errors".
+- **Right:** Use the bridge's `prepareForm` status + a post-compile `getRows` on the form itself. **But:** when `prepareForm` *fails* with a compile error, `FORMPREPERRS` content IS authoritative for that failure — it names the form, column, and trigger/EXPR step precisely (e.g. `AINVOICEITEMS/ASTR_QPRICEN/EXPR` pointing at a dangling `$ASTR_EXCHANGE3`). Read it once immediately after a failing compile.
+- **See:** `triggers.md` § "FORMPREPERRS accumulates stale errors", `forms.md` § "Sub-level EXPR column referencing a parent column".
+
+### Form returns N duplicate rows per logical record
+- **Symptom:** Parent form filter returns many copies of the same record (e.g., `IVNUM=T396` → 299 rows); base table has 1 row; a sibling form on the same base table returns 1 row correctly.
+- **Wrong:** Chase the base table, joins, or trigger logic first.
+- **Right:** Scan FORMCLMNS on the parent form AND every sub-level form for:
+  1. Private-dev imported columns (`IDCOLUMN >= 5`, `JOIN > 0`, `EXPRESSION` blank) whose `(IDJOIN, COLUMN)` pair collides with an existing base-form join instance — private-dev imports must use `IDJOIN >= 6` (see `forms.md` § "Multiple Joins"). Collisions compile to a defective join graph that cartesian-multiplies.
+  2. Sub-level EXPRESSION columns (`EXPRESSION=Y`) whose body references a parent-form column that was recently removed or renamed (dangling `:$$.<COL>`). Also check `FORMCLTRIGTEXT` for `:$<COL>` references.
+- **Fix:** DELETE the offending FORMCLMNS rows on both parent and sub-level, then `priority.prepareForm` both. Confirm via `FORMPREPERRS` getRows.
+- **See:** `docs/solutions/database-issues/priority-form-row-duplication-astr-chain-2026-04-20.md`, `forms.md` § "Multiple Joins".
 
 ### Relying on `runSqliFile` / `executeDbi` with a specific `entityName`
 - **Wrong:** These run the currently active VSCode editor tab regardless; `entityName` is logging only. Stale content may run if VSCode hasn't reloaded.
