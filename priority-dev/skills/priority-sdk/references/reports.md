@@ -44,6 +44,10 @@
   - [Multi-Company Reports](#multi-company-reports)
   - [Processed Reports](#processed-reports)
 - [Run Reports](#run-reports)
+- [User Report Generators](#user-report-generators)
+  - [Components](#components)
+  - [Create Your Own Generator](#create-your-own-generator)
+  - [Add Columns to a Standard Generator](#add-columns-to-a-standard-generator)
 
 ---
 
@@ -662,3 +666,68 @@ Use the **Run Report** program (Reports menu) or the **Run Report/Procedure** pr
 4. Flag **Background Execution** if the report should run in the background
 
 When activated from a form, input is restricted to the form record on which the cursor rests. Only columns from the form's base table serve as input.
+
+---
+
+## User Report Generators
+
+A **user report generator** lets end-users build their own reports on a domain (e.g., **Customer Data Report Generator**, **Customer Invoices Report Generator**). If you've added a custom module, or added columns to a form that already has a generator, you often need to create or modify one. **Standard generators cannot be revised** — all three component entities must be copied first.
+
+### Components
+
+Every report generator is three linked entities:
+
+| Entity | Purpose |
+|---|---|
+| **Base report** | Columns the user can include in the generated report. |
+| **Form** | UI for constructing a report; retrieves records from the base report. |
+| **Procedure** | Runs the user-defined report with the chosen columns and filters. |
+
+### Create Your Own Generator
+
+**1. Construct the base report.** Build a standard report, with these extra rules:
+
+- Every column the user can include must have a **revised title** (the revised title is what the user sees in the form).
+- Any groupable column needs a value in **Group by** and `R` in **Group Func.**.
+- Flag the **Input** column on any column that accepts user input at runtime.
+- Verify all joins and apply report optimization.
+
+**2. Construct the form by copying `ASSETREP`.** Run `WINPROC -P COPYFORM` via **Tools → Run Entity (Advanced…)** (Windows) or **Run → Run Entity (Advanced…)** (Web). Enter `ASSETREP` as the source and a new custom-prefix name as the target.
+
+> **Warning.** Copying a standard Priority form is normally forbidden. The user-report-generator form is the **only** case where it is permitted. Do not generalise this pattern.
+
+If you need to copy a generator form other than `ASSETREP`, pick one whose `TYPE` column expression (in the **Form Column Extension** sub-level) is `r`. Older generators used different `TYPE` values for different report families; modern generators all use `r` and distinguish families by the `:PREFIX` variable instead.
+
+Then revise the copy:
+
+1. Edit the **PRE-FORM trigger**. Original:
+   ```sql
+   :REPEXEC = 0;
+   SELECT EXEC INTO :REPEXEC FROM EXEC
+     WHERE ENAME = 'ASSETREP' AND TYPE = 'R';
+   :PREFIX = 'AST';
+   :KEYSTROKES = '%{Exit}';
+   ```
+   - Replace `ASSETREP` with the name of your base report.
+   - Replace `:PREFIX = 'AST';` with a new three-letter prefix (e.g., `'PST'`).
+2. In **Form Columns** → `ENAME` column → **Form Column Extension**, change the expression from `LIKE 'AST%'` to match your new prefix (`LIKE 'PST%'`).
+3. Apply the same `LIKE 'AST%'` → `LIKE 'PST%'` rewrite in the **POST-FIELD** triggers on the `TITLE` and `ENAME` columns.
+4. Link the standard `GREPCLMNS` form as a sub-level of the new form.
+
+**3. Construct the runner procedure by copying `RUNCUSTREP`.** In the new procedure:
+
+1. In step 10's SQLI query, change `:TYPE = 'g'` to `:TYPE = 'r'`.
+2. In the same query, change `:PAT` to match the form's new `:PREFIX` (e.g., `:PAT = 'PST';`).
+3. If the base report takes parameters (date range, flags, etc.), add them as **input step** parameters and wire them into the **run-report step**. See the `FDT` / `TDT` parameters in `RUNPROJREP` for a worked example.
+4. Change the report name in the last procedure step to the new base report.
+
+**4. Allow user access.** Link the new form and procedure to the relevant menu.
+
+### Add Columns to a Standard Generator
+
+Adding columns to an existing standard generator still requires copying all three entities — only the source changes.
+
+1. Copy the standard **base report** (e.g., `INVOICEREP` → `XXXX_INVOICEREP`) and add the new columns to the copy.
+2. Copy the standard **form** that shares the base-report name (e.g., `INVOICEREP` → `XXXX_INVOICEREP`) and revise the copy following the `ASSETREP` steps above (PRE-FORM trigger, ENAME/TITLE POST-FIELD triggers, `LIKE` expression, `GREPCLMNS` sub-level).
+3. Copy the matching **`RUN*REP` procedure** (e.g., `RUNINVOICEREP` → `XXXX_RUNINVOICEREP`). In the SQLI query line, set `:TYPE = 'r'; :PAT = 'XXX';` (where `XXX` is the prefix assigned in step 2) and change the report name in the last procedure step.
+4. Link the new form and procedure to the relevant menu.

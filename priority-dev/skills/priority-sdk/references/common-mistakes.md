@@ -143,6 +143,11 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** `EXECUTE` with a `.pq` file.
 - **See:** `triggers.md` § "SQLI trigger syntax gotchas".
 
+### Cursor inside a combined trigger (POST-UPD-INS etc.)
+- **Wrong:** Cursor declarations fail silently or at compile in combined-event slots like `POST-UPD-INS` / `POST-INSUPD`.
+- **Right:** Split into single-event triggers (POST-INSERT + POST-UPDATE, share logic via INCLUDE), or invoke a helper procedure from the combined slot.
+- **See:** `triggers.md` § "Cursors cannot run in combined triggers" (SDK 23.1 release-notes gotcha).
+
 ## Deployment
 
 ### Using `TAKESINGLEENT` for any change

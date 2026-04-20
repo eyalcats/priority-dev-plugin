@@ -965,6 +965,14 @@ Cannot add a column-level trigger to a system column via WebSDK or `write_to_edi
 
 `write_to_editor` returns `TRIGGER_NOT_FOUND` for column-level triggers, and WebSDK `newRow` on FORMCLTRIGTEXT silently appends. See `forms.md` § "Column trigger code — use DBI, not WebSDK `newRow`" for the DELETE+INSERT pattern.
 
+### Cursors cannot run in combined triggers
+
+**Combined trigger slots** — single slots that fire on multiple row events, such as `POST-UPD-INS` or `POST-INSUPD` — cannot declare or iterate a cursor. Attempting this either fails at compile or silently skips the cursor body at runtime.
+
+If you need cursor iteration, **split the logic into single-event triggers** (POST-INSERT + POST-UPDATE with shared INCLUDE if the bodies diverge), or move the iteration into a helper procedure invoked from the combined slot.
+
+Documented in the SDK 23.1 release notes (April 2024) but absent from the triggers chapter itself — easy to miss.
+
 ### Reading WebSDK trigger messages
 
 After a `saveRow` or `fieldUpdate`, inspect `result.warning`, `result.info`, `result.error`. These capture WRNMSG / PRINT / ERRMSG fired by triggers during the op.

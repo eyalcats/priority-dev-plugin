@@ -128,7 +128,7 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 |------|----------|
 | **`references/forms.md`** | Form creation, all column types, joins, sub-level forms, conditions, text forms, SQL variables |
 | **`references/triggers.md`** | All trigger types with examples, ERRMSG/WRNMSG, MAILMSG, INCLUDE/buffers, form preparation |
-| **`references/reports.md`** | Report creation, columns, sorting/grouping, calculated columns, CSS styling, report types |
+| **`references/reports.md`** | Report creation, columns, sorting/grouping, calculated columns, CSS styling, report types, user report generators (copy-ASSETREP-and-RUNCUSTREP pattern) |
 | **`references/procedures.md`** | Procedure steps, parameters, user input methods, step queries, flow control, PRINT messages, direct activations (`:$.PAR`, LINK/UNLINK/INSERT) |
 | **`references/documents.md`** | Document generation, WINHTML program (direct/quick syntax), all parameters, print formats |
 | **`references/interfaces.md`** | Form loads (INTERFACE), table loads (DBLOAD), GENERALLOAD, XML/JSON, dynamic interfaces, STACKERR, ODBC Driver, EDI form-load internals (INTERFORMS → FORMCLTRIG, INTERCLMNSFILE → FORMCLMNS) |
@@ -139,7 +139,7 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 
 | File | Contents |
 |------|----------|
-| **`references/advanced-programming.md`** | WSCLIENT (REST/OAuth2), XMLPARSE, JSONPARSE, SFTPCLNT, FILTER, WINAPP, WINRUN, Dynamic SQL, Semaphores, Click2Sign |
+| **`references/advanced-programming.md`** | WSCLIENT (REST/OAuth2/SOAP 25.1+), XMLPARSE, JSONPARSE, SFTPCLNT, FILTER, WINAPP, WINRUN, Dynamic SQL, Semaphores, Click2Sign |
 | **`references/debugging.md`** | Debug flags (-trc), optimization, logging, revisions, VSCode extension, HEAVYQUERY, **Claude Code MCP integration** |
 | **`references/vscode-bridge-examples.md`** | VSCode bridge tool usage examples: get_current_file, write_to_editor, refresh_editor, run_windbi_command (38 commands), common workflows (read→edit→compile, inspect, scaffold, search, ad-hoc queries) |
 | **`references/websdk-cookbook.md`** | **WebSDK tested patterns**: operation property reference (including `filter` with `operator` for LIKE/>=/<= searches), `filter` vs `search` distinction, common mistakes, copy-paste recipes (read/hide/add columns, expressions, triggers, compile), SQLI metadata queries (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT), EFORM alias→real table mapping |

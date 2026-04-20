@@ -1069,6 +1069,29 @@ When `-content` is set to `text/xml`, the system performs stricter validation on
 **Timeout Limitations**
 While the `-timeout` parameter accepts large values (in milliseconds), the connection may still drop if external factors (load balancers, firewalls, or the destination server's own timeout settings) are set to a lower threshold than the `WSCLIENT` parameter.
 <!-- ADDED END -->
+
+### SOAP / XML Responses (25.1+)
+
+Starting with SDK 25.1, `WSCLIENT` accepts responses with `Content-Type: application/soap+xml` in addition to JSON and plain XML. Pair `-content` with `-action` to set the SOAPAction header required by most SOAP services:
+
+```sql
+EXECUTE WSCLIENT :URL, :INFILE, :OUTFILE,
+  '-msg',     :MSGFILE,
+  '-content', 'application/soap+xml; charset=utf-8',
+  '-action',  'http://tempuri.org/MyOperation';
+```
+
+Parse the response with `XMLPARSE` (see the XML/JSON Parsing section):
+
+```sql
+EXECUTE XMLPARSE :OUTFILE, :LINKFILE, 0, :MSG;
+```
+
+Notes:
+- When `-content` is `text/xml` or `application/soap+xml`, the server validates that the XML header's encoding matches (e.g., `text/xml; charset="utf-8"` must match `<?xml version="1.0" encoding="UTF-8"?>` in the input file).
+- To read SOAP envelopes larger than 1023 characters per tag, ensure the server BIN is 23.1+ so `XMLPARSE` can read up to 45,000 chars per tag.
+- If the SOAP response only carries data in headers, combine with `-headout` to capture the header file separately.
+
 ### URL Longer Than 127 Characters
 
 ```sql
