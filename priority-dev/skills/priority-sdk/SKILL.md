@@ -252,6 +252,8 @@ To find specific content in reference files, search for these patterns:
 | Copy entity (proc/report/form/interface) | `COPYPROG\|COPYREP\|COPYFORM\|COPYINTER\|WINPROC -P` | `references/procedures.md` |
 | Generator-form ENAMEs | `EPROG\|EREP\|EFORM\|EINTER\|Canonical generator-form names` | `references/websdk-cookbook.md` |
 | SELECT prints nothing | `Output Formats for SELECT\|FORMAT;\|Execution ok` | `references/sql-core.md`, `references/common-mistakes.md` |
+| Unfiltered getRows empty / bridge sees nothing | `Unfiltered .getRows. returns empty\|session or tenant\|Logging in to url` | `references/common-mistakes.md`, memory `feedback_verify_bridge_tenant_before_debug.md` |
+| Subagent hallucinated a result | `Done .0 tool uses\|subagent summary\|unverified` | `references/common-mistakes.md` |
 | Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|TAKEUPGRADE\|DOWNLOADUPG\|generate_shell` | `references/deployment.md` |
 | Direct activations | `FORMEXEC\|:\$\.PAR\|direct activation\|LINK.*TO.*:\$\.PAR` | `references/procedures.md`, `references/deployment.md` |
 | EDI internals | `INTERFORMS\|INTERCLMNSFILE\|EINTER\|INTERFACE.*-form` | `references/interfaces.md` |

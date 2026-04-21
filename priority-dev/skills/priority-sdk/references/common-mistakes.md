@@ -262,6 +262,20 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
   The subsequent `message` (messagetype `information` = success) arrives after the copy has already landed server-side.
 - **See:** `procedures.md` § "The subtle inputFields gotcha", `bridge/src/websdk/compounds.ts` → `generateCopyEntityScript`.
 
+### Unfiltered `getRows` returns empty on a busy form (EPROG / EFORM / EREP / EINTER)
+- **Symptom:** Even `{"form":"EPROG","operations":[{"op":"getRows","top":5}]}` with no filter returns `{}`. Since the form universally has rows (EPROG lists every procedure on the tenant), this is not a filter issue.
+- **Wrong:** Trying more filter variants, mutating field/value, blaming the record's ENAME width, or chasing a hallucinated `activateByName` op.
+- **Right:** This is a bridge **session or tenant** problem — one of:
+  1. The bridge is authenticated to a different company than the user's UI. Read the trace line `[websdk] Logging in to url=... company=<X> tabulaini=... language=<N> user=<U>` and cross-check with the user. Compare timestamps of `priority.selectAllRowsFromTable` on a known table with what the user sees in their UI — a "stale" or "empty" result is a tenant-mismatch signal.
+  2. The bridge login failed mid-session. Re-run any operation — the bridge re-authenticates on every child script call; if the stored credentials are wrong / expired / have no privileges, every op returns empty.
+  3. The authenticated user has no privilege on that form. Ask the user to verify the bridge's username has access in their Priority client.
+- **See:** `common-mistakes.md` § "Debugging across tenants without verifying bridge connection", memory `feedback_verify_bridge_tenant_before_debug.md`.
+
+### Trusting a subagent summary that reports `Done (0 tool uses · N tokens)`
+- **Symptom:** A subagent (`priority-dev:researcher` / `builder` / `verifier`) returns a confident success summary ("procedure copied successfully, EXEC ID 690, title ..."), but the tool-use count in its completion line is **0**. The main agent treats the summary as truth and reports success to the user — who then says "I don't see it."
+- **Wrong:** Believing subagent text without checking it made any calls. A subagent that made zero tool calls cannot have created, modified, or verified anything — the summary is hallucinated structure.
+- **Right:** If you see `Done (0 tool uses · ...)`, treat the subagent output as **unverified** and re-run the relevant verification step yourself — typically a direct `run_inline_sqli` against EXEC or a `websdk_form_action getRows` — before claiming success. Prefer direct bridge calls for operations that must land (copy / create / delete); subagents are fine for read-only research but still need ground-truth verification when a write was expected.
+
 ### `filter` op returns empty for a record that definitely exists in EXEC
 - **Symptom:** `SELECT ENAME FROM EXEC WHERE ENAME = 'BOAZ_CALC_MANUFACTUR' FORMAT;` returns the row, but `websdk_form_action form:"EPROG", {"op":"filter", ...} + getRows` returns `{}`. Agent then iterates trying `activateByName` (hallucinated) and other invented ops, or concludes the bridge is pointed at the wrong tenant.
 - **Root cause (almost always):** param-name typo. The `filter` op requires `field` — `{"op":"filter","field":"ENAME","value":"..."}`. Using `name` instead (`{"op":"filter","name":"ENAME","value":"..."}`) passes `op.field === undefined` to `setSearchFilter`, which silently matches nothing. This is the same class of bug as `startSubForm subform` vs `name`. The bridge does not validate unknown keys — it just reads the ones it expects.
