@@ -70,6 +70,19 @@ Wrong (silently fails with "Can't find Sub Form: undefined"):
 {"op": "startSubForm", "subform": "FCLMN"}
 ```
 
+### Critical: `filter` uses `field`, not `name`
+
+```json
+{"op": "filter", "field": "ENAME", "value": "MY_PROC"}
+```
+
+Wrong — filter silently matches nothing (the bridge passes `op.field === undefined` to `setSearchFilter`), and the next `getRows` returns `{}` even when the record exists:
+```json
+{"op": "filter", "name": "ENAME", "value": "MY_PROC"}
+```
+
+This is the single most common cause of "I can see the record in the Priority UI / `SELECT FROM EXEC`, but the bridge can't find it." Do not conclude the bridge is pointed at a different tenant until you've confirmed the `filter` op uses `field`.
+
 ### Subform names: no `_SUBFORM` suffix
 
 WebSDK uses bare subform names. The `_SUBFORM` suffix is an OData URL convention — do not use it with `startSubForm`.
@@ -637,6 +650,18 @@ SELECT EXEC FROM EXEC WHERE ENAME = 'MY_FORM' AND TYPE = 'F' FORMAT;
 ```
 
 `TYPE` is `F` (form), `P` (procedure), `R` (report), or `T` (table). When inserting in bulk you can also embed the lookup as a subquery — see `### Query column-level triggers and their code` below for the pattern.
+
+### `filter` vs `search` on generator forms
+
+| Need | Op | Maps to | Scope |
+|------|------|---------|-------|
+| Narrow the current form to a known record for navigation | `filter` | `setSearchFilter(...)` | Client-side filter on the visible page — **respects** the form's ACCEPT / visibility conditions, so procs or forms outside your scope return empty. |
+| Look up a record that may be outside your visibility scope (picker-style) | `search` | `choose(field, value)` | Broad lookup — can find records `filter` misses. |
+| Confirm a record exists at all | neither — use SQLI on `EXEC` | `SELECT ENAME FROM EXEC WHERE ENAME = '<name>' FORMAT;` | Authoritative across scopes. |
+
+**Rule:** treat the generator form as a *UI surface* for acting on records, not as a source-of-truth for whether they exist. `SELECT FROM EXEC` is the existence check. This avoids the failure mode where `filter` returns `{}` for a record that's definitely in EXEC — common on EPROG / EFORM / EREP / EINTER when the proc belongs to a prefix / module you don't own. See `common-mistakes.md` for the specific anti-pattern.
+
+> **Note.** `activateByName` is **not** a real bridge op or priority-web-sdk method. If a previous session claimed it worked, that was likely a mislabeled `search` call in a subagent summary — ignore and use `search` / `SELECT FROM EXEC` per the table above.
 
 ### Canonical generator-form names
 

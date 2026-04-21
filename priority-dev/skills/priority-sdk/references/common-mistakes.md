@@ -262,6 +262,17 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
   The subsequent `message` (messagetype `information` = success) arrives after the copy has already landed server-side.
 - **See:** `procedures.md` § "The subtle inputFields gotcha", `bridge/src/websdk/compounds.ts` → `generateCopyEntityScript`.
 
+### `filter` op returns empty for a record that definitely exists in EXEC
+- **Symptom:** `SELECT ENAME FROM EXEC WHERE ENAME = 'BOAZ_CALC_MANUFACTUR' FORMAT;` returns the row, but `websdk_form_action form:"EPROG", {"op":"filter", ...} + getRows` returns `{}`. Agent then iterates trying `activateByName` (hallucinated) and other invented ops, or concludes the bridge is pointed at the wrong tenant.
+- **Root cause (almost always):** param-name typo. The `filter` op requires `field` — `{"op":"filter","field":"ENAME","value":"..."}`. Using `name` instead (`{"op":"filter","name":"ENAME","value":"..."}`) passes `op.field === undefined` to `setSearchFilter`, which silently matches nothing. This is the same class of bug as `startSubForm subform` vs `name`. The bridge does not validate unknown keys — it just reads the ones it expects.
+- **Wrong:** Using `name` in a `filter` op. Invoking `activateByName` — not a real bridge op or priority-web-sdk method, any apparent "success" is a mislabeled `search`/`choose` call in a subagent summary.
+- **Right:**
+  1. Use `field` in `filter` ops — never `name`. Confirm via `websdk-cookbook.md` § "Operation Property Reference".
+  2. If you must verify existence before navigating, run `SELECT ENAME, TITLE, TYPE FROM EXEC WHERE ENAME = '<name>' FORMAT;` — EXEC is the authoritative existence check across scopes.
+  3. If `filter` with the correct `field` still returns empty, fall back to `{"op":"search","field":"ENAME","value":"..."}` — it maps to `currentForm().choose()`, a broader picker-style lookup that bypasses the form's client-side ACCEPT scoping (`filter` uses `setSearchFilter`, which respects it).
+  4. For *copying* an entity, skip navigation entirely — use the `copyEntity` compound op, which drives `procStart` on COPYPROG/COPYREP/COPYFORM/COPYINTER directly and doesn't need the source to be visible on any generator form.
+- **See:** `websdk-cookbook.md` § "Operation Property Reference" and § "`filter` vs `search` on generator forms", `procedures.md` § "Copying existing entities".
+
 ### Guessing the generator-form ENAME (e.g., `EPROC`, `EREPGEN`)
 - **Symptom:** WebSDK `formStart` fails with `אין מסך בשם זה` (no such form).
 - **Wrong:** Guessing from the entity type — `EPROC` for procedures, `EREPGEN` for reports, `EINTERFACE` for interfaces. None of these exist.
