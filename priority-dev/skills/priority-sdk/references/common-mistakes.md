@@ -242,11 +242,25 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 ### Hand-rebuilding a procedure / report / form / interface instead of using COPY*
 - **Symptom:** User says "duplicate BOAZ_CALC_MANUFACTUR" → agent starts with `INSERT INTO EXEC (...) VALUES (...)` then tries to reconstruct steps / parameters / triggers one at a time. Iterates for dozens of tool calls and still misses targets and hidden metadata.
 - **Wrong:** DIY reconstruction. Priority's copier carries metadata that FOREIGN KEY joins and trigger tables don't surface through introspection.
-- **Right:** Invoke the matching built-in copier: `COPYPROG` (proc), `COPYREP` (report), `COPYFORM` (form), `COPYINTER` (interface). Each prompts for source + target name.
-  - UI: Tools/Run → **Run Entity (Advanced…)** → `COPYPROG`.
-  - CLI: `WINPROC -P COPYPROG`.
-  - Programmatic: `priority.procStart('COPYPROG', 'P')` then drive `inputFields` — same pattern the bridge uses for `FORMPREP` in `compounds.ts`. **Caveat:** the bridge does not currently expose a standalone `procStart` op via `websdk_form_action`; if automation is required, add a `copyEntity` compound op.
+- **Right:** Invoke the matching built-in copier via the bridge's `copyEntity` compound op:
+  ```json
+  {"operations": [{"op": "copyEntity", "kind": "proc", "source": "<SOURCE>", "target": "<TARGET>"}]}
+  ```
+  `kind` = `"proc"` / `"report"` / `"form"` / `"interface"` → runs `COPYPROG` / `COPYREP` / `COPYFORM` / `COPYINTER`. No `form` parameter — the compound drives `priority.procStart` directly.
 - **See:** `procedures.md` § "Copying existing entities (COPYPROG / COPYREP / COPYFORM / COPYINTER)".
+
+### Driving COPY* manually by sending source and target in two separate inputFields calls
+- **Symptom:** After `proc.proc.inputFields(1, { EditFields: [{field:1, value:'<SOURCE>'}]})` the proc returns `type='message'` ("הכנס שם לפרוצדורה החדשה" / "Enter new name"). Calling `continueProc` lands on `type='end'` with no copy made. Calling a second `inputFields` returns `type='message'` / messagetype='error' "הפרוצדורה הנוכחית אינה פעילה יותר" ("current procedure is no longer active").
+- **Wrong:** Treating source and target as two sequential input steps.
+- **Right:** Send **both** fields in a single `inputFields` call — COPY* procs define source as field 1 and target as field 2 within the same step:
+  ```js
+  proc = await proc.proc.inputFields(1, { EditFields: [
+    { field: 1, op: 0, value: '<SOURCE>', op2: 0, value2: '' },
+    { field: 2, op: 0, value: '<TARGET>', op2: 0, value2: '' },
+  ]});
+  ```
+  The subsequent `message` (messagetype `information` = success) arrives after the copy has already landed server-side.
+- **See:** `procedures.md` § "The subtle inputFields gotcha", `bridge/src/websdk/compounds.ts` → `generateCopyEntityScript`.
 
 ### Guessing the generator-form ENAME (e.g., `EPROC`, `EREPGEN`)
 - **Symptom:** WebSDK `formStart` fails with `אין מסך בשם זה` (no such form).

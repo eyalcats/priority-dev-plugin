@@ -174,7 +174,11 @@ Read `references/forms.md` for form setup, then `references/triggers.md` for tri
 Read `references/procedures.md` > User Input section, then see `examples/procedure-examples.sql`.
 
 ### Copy a procedure / report / form / interface
-Do **not** rebuild the entity by hand. Use the matching Priority copier: `COPYPROG` (proc), `COPYREP` (report), `COPYFORM` (form), `COPYINTER` (interface). Read `references/procedures.md` > "Copying existing entities (COPYPROG / COPYREP / COPYFORM / COPYINTER)" for invocation paths (UI, `WINPROC -P`, or WebSDK `procStart`+`inputFields`).
+Do **not** rebuild the entity by hand. Use the `copyEntity` compound op on `websdk_form_action`:
+```json
+{"operations": [{"op": "copyEntity", "kind": "proc"|"report"|"form"|"interface", "source": "<SRC>", "target": "<TGT>"}]}
+```
+The compound maps `kind` to `COPYPROG` / `COPYREP` / `COPYFORM` / `COPYINTER` and drives `priority.procStart` + `inputFields` with both fields (source, target) in a single call — that's the only call shape that actually completes the copy. Read `references/procedures.md` > "Copying existing entities" for the gotcha and manual-invocation fallbacks (UI / `WINPROC -P`).
 
 ### Generate a document (PDF/print)
 Read `references/documents.md` > WINHTML section, then see `examples/procedure-examples.sql` for WINHTML patterns.

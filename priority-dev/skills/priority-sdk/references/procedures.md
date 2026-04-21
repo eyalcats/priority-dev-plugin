@@ -93,42 +93,58 @@ FORMAT;
 
 The copiers are TYPE='P' with no parent form, so they are run top-level (not via `activateStart` on a generator form). Pick the path that matches the environment:
 
-1. **Priority UI (Windows / Web)** — preferred when the user is at the keyboard.
+1. **WebSDK via the bridge (preferred for Claude Code).** Use the `copyEntity` compound op on `websdk_form_action` — no `form` parameter, the compound drives `priority.procStart` + `inputFields` internally:
+
+   ```json
+   {
+     "operations": [
+       {
+         "op": "copyEntity",
+         "kind": "proc",
+         "source": "SOF_TEST",
+         "target": "ZZZ_SOF_TEST_COPY"
+       }
+     ]
+   }
+   ```
+
+   `kind` must be one of `"proc"` / `"report"` / `"form"` / `"interface"` — the compound maps them to `COPYPROG` / `COPYREP` / `COPYFORM` / `COPYINTER` respectively. Returns `{status: "ok"}` on success with the program name and full step trace in `data.trace`.
+
+   Verified live against `SOF_TEST` → `ZZZ_SOF_TEST_COPY` on 2026-04-21 — trace: inputFields(both fields in one call) → message("העתקת הפרוצדורה הסתיימה בהצלחה" / "Copy completed successfully") → end.
+
+2. **Priority UI (Windows / Web)** — use when the user is at the keyboard.
    - Windows client: **Tools → Run Entity (Advanced…)** → enter `COPYPROG` (or `COPYREP` / `COPYFORM` / `COPYINTER`).
    - Web client: **Run → Run Entity (Advanced…)** → same.
-   - Priority prompts for **Source** (existing entity name) and **Target** (new name — must respect the four-letter prefix rule for custom entities, e.g., `XXXX_NEWPROC`).
+   - Priority prompts for **Source** and **Target** in a single dialog with two fields.
 
-2. **Command line (server shell or Priority CLI).** Exactly the pattern `reports.md` already uses for generator forms:
+3. **Command line (server shell).**
    ```
    WINPROC -P COPYPROG
    WINPROC -P COPYREP
    WINPROC -P COPYFORM
    WINPROC -P COPYINTER
    ```
-   Runs interactively; same source/target prompts as the UI.
 
-3. **WebSDK child script (programmatic).** The bridge's `websdk_form_action` does not yet expose a standalone `procStart` / `inputFields` op — `activateStart` only works inside a form context, and these copiers have no parent form. If you need to drive a copier from Claude Code autonomously today, either (a) ask the user to run it in the UI or CLI, or (b) request a new bridge compound op (spec: `{op: "copyEntity", kind: "proc"|"report"|"form"|"interface", source, target}` — analogous to `generateCompileScript` in `bridge/src/websdk/compounds.ts`, which chains `procStart('FORMPREP','P') → inputOptions → inputFields`). The underlying WebSDK calls are:
-   ```js
-   // Inside a child script run via a bridge compound:
-   let proc = await priority.procStart('COPYPROG', 'P');       // or COPYREP / COPYFORM / COPYINTER
-   // Each input step surfaces as proc.type === 'inputFields'; drive it:
-   if (proc.type === 'inputFields') {
-     proc = await proc.proc.inputFields(1, { EditFields: [
-       { field: 1, op: 0, value: '<SOURCE_NAME>', op2: 0, value2: '' }
-     ]});
-   }
-   if (proc.type === 'inputFields') {
-     proc = await proc.proc.inputFields(1, { EditFields: [
-       { field: 1, op: 0, value: '<TARGET_NAME>', op2: 0, value2: '' }
-     ]});
-   }
-   // proc.type === 'message' (success) or 'displayUrl' (error report) terminates the flow.
-   ```
-   The exact number of `inputFields` steps and any intervening `inputOptions` (radio buttons) differs per copier — trace it on first run. See `compounds.ts` → `generateCompileScript` for a verified end-to-end example of the procStart+inputFields pattern.
+### The subtle inputFields gotcha
+
+COPY* procs take **both** the source and target in a **single** `inputFields` step, as field 1 and field 2. Supplying only field 1 and then trying to continue (via `continueProc` or a second `inputFields` call) lands you with either a silent "proc finished, no copy made" state or "הפרוצדורה הנוכחית אינה פעילה יותר" ("current procedure is no longer active"). The canonical call shape the compound uses:
+
+```js
+let proc = await priority.procStart('COPYPROG', 'P');
+// proc.type === 'inputFields' — supply BOTH fields in one call
+proc = await proc.proc.inputFields(1, { EditFields: [
+  { field: 1, op: 0, value: '<SOURCE>', op2: 0, value2: '' },
+  { field: 2, op: 0, value: '<TARGET>', op2: 0, value2: '' },
+]});
+// proc.type === 'message' / messagetype === 'information' — success
+// proc.type === 'end' on the next step
+```
+
+If you ever need to build a similar driver for a different input-step-only procedure, model it on `generateCopyEntityScript` / `generateCompileScript` in `bridge/src/websdk/compounds.ts`.
 
 ### Don't: symptoms of re-inventing the copier
 
-If you find yourself running `INSERT INTO EXEC (ENAME, TITLE, TYPE, EDES) VALUES ...` followed by hand-rebuilding steps / parameters / triggers — stop. Use `COPYPROG` / `COPYREP` / `COPYFORM` / `COPYINTER` instead and then diff the copy for the custom tweaks you actually wanted. `common-mistakes.md` has a quick-lookup entry for this.
+If you find yourself running `INSERT INTO EXEC (ENAME, TITLE, TYPE, EDES) VALUES ...` followed by hand-rebuilding steps / parameters / triggers — stop. Use the `copyEntity` compound op (or the UI / `WINPROC -P`), then diff the copy for the custom tweaks you actually wanted. `common-mistakes.md` has a quick-lookup entry.
 
 ## Procedure Attributes
 
