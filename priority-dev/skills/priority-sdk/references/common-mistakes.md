@@ -229,3 +229,34 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Wrong:** These run the currently active VSCode editor tab regardless; `entityName` is logging only. Stale content may run if VSCode hasn't reloaded.
 - **Right:** Use `run_inline_sqli` — direct WCF, no active-editor dependency.
 - **See:** `websdk-cookbook.md` § "Known bridge behaviors" → "`runSqliFile` / `executeDbi` active-editor".
+
+### `SELECT` via `run_inline_sqli` prints no rows ("Execution ok" with nothing)
+- **Symptom:** `run_inline_sqli({ sql: "SELECT ENAME FROM EXEC WHERE ENAME = 'FOO'" })` returns success with zero visible rows — then the next agent retries the query 5 different ways, guessing the entity must not exist.
+- **Wrong:** Assuming the row isn't there; varying syntax, adding LIKE, switching tables.
+- **Right:** Always append `FORMAT;` (or `TABS;` / `DATA;`) to print rows. SQLI's `SELECT` without an output clause executes and discards. This is documented as a SQL extension in `sql-core.md` § "Output Formats for SELECT" but is a repeat offender in practice.
+  ```sql
+  SELECT ENAME, TITLE, TYPE FROM EXEC WHERE ENAME = 'FOO' FORMAT;
+  ```
+- **See:** `sql-core.md` § "Output Formats for SELECT".
+
+### Hand-rebuilding a procedure / report / form / interface instead of using COPY*
+- **Symptom:** User says "duplicate BOAZ_CALC_MANUFACTUR" → agent starts with `INSERT INTO EXEC (...) VALUES (...)` then tries to reconstruct steps / parameters / triggers one at a time. Iterates for dozens of tool calls and still misses targets and hidden metadata.
+- **Wrong:** DIY reconstruction. Priority's copier carries metadata that FOREIGN KEY joins and trigger tables don't surface through introspection.
+- **Right:** Invoke the matching built-in copier: `COPYPROG` (proc), `COPYREP` (report), `COPYFORM` (form), `COPYINTER` (interface). Each prompts for source + target name.
+  - UI: Tools/Run → **Run Entity (Advanced…)** → `COPYPROG`.
+  - CLI: `WINPROC -P COPYPROG`.
+  - Programmatic: `priority.procStart('COPYPROG', 'P')` then drive `inputFields` — same pattern the bridge uses for `FORMPREP` in `compounds.ts`. **Caveat:** the bridge does not currently expose a standalone `procStart` op via `websdk_form_action`; if automation is required, add a `copyEntity` compound op.
+- **See:** `procedures.md` § "Copying existing entities (COPYPROG / COPYREP / COPYFORM / COPYINTER)".
+
+### Guessing the generator-form ENAME (e.g., `EPROC`, `EREPGEN`)
+- **Symptom:** WebSDK `formStart` fails with `אין מסך בשם זה` (no such form).
+- **Wrong:** Guessing from the entity type — `EPROC` for procedures, `EREPGEN` for reports, `EINTERFACE` for interfaces. None of these exist.
+- **Right:** The canonical generator-form ENAMEs are:
+  | Entity      | Generator form |
+  |-------------|----------------|
+  | Procedure   | `EPROG` (mislabeled as `EPROC` elsewhere) |
+  | Report      | `EREP`  |
+  | Form        | `EFORM` |
+  | Interface   | `EINTER` |
+  Verify at any time with `SELECT ENAME, TITLE FROM EXEC WHERE TYPE = 'F' AND TITLE LIKE '%מחולל%' FORMAT;`.
+- **See:** `websdk-cookbook.md` § "Canonical generator-form names".

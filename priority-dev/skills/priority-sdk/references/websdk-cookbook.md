@@ -638,6 +638,30 @@ SELECT EXEC FROM EXEC WHERE ENAME = 'MY_FORM' AND TYPE = 'F' FORMAT;
 
 `TYPE` is `F` (form), `P` (procedure), `R` (report), or `T` (table). When inserting in bulk you can also embed the lookup as a subquery — see `### Query column-level triggers and their code` below for the pattern.
 
+### Canonical generator-form names
+
+When opening a Priority generator form with `websdk_form_action`, use the exact ENAME — guessing by prefix (`EPROC`, `EREPGEN`, `EINTERFACE`) yields `אין מסך בשם זה` / "No such form" and wastes iterations.
+
+| Entity you want to work on | Generator form ENAME | Notes |
+|----------------------------|----------------------|-------|
+| Procedures                 | `EPROG`              | **Not** `EPROC`. Title: מחולל פרוצדורות |
+| Reports                    | `EREP`               | **Not** `EREPGEN`. Title: מחולל דו"חות |
+| Forms                      | `EFORM`              | Title: מחולל מסכים |
+| Interfaces                 | `EINTER`             | **Not** `EINTERFACE`. Title: מחולל ממשקים למסכים |
+| Menus                      | `EMENU`              | Title: מחולל תפריטים |
+| Documents                  | `EDOC`               | Title: מחולל מסמכים |
+
+Live verification (no arguments needed; the filter pattern is stable across tenants):
+
+```sql
+SELECT ENAME, TITLE FROM EXEC
+WHERE ENAME IN ('EPROG','EREP','EFORM','EINTER','EMENU','EDOC')
+  AND TYPE = 'F'
+ORDER BY ENAME FORMAT;
+```
+
+To copy an entity rather than open its generator, use the matching **COPY\*** program — not the generator form. See `procedures.md` § "Copying existing entities".
+
 ---
 
 ## Recipe: Text Subform Creation (canonical 6-call)

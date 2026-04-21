@@ -3,7 +3,7 @@
 ## Table of Contents
 
 - [Introduction](#introduction)
-- [Copy a Procedure](#copy-a-procedure)
+- [Copying existing entities (COPYPROG / COPYREP / COPYFORM / COPYINTER)](#copying-existing-entities-copyprog--copyrep--copyform--copyinter)
 - [Procedure Attributes](#procedure-attributes)
 - [Procedure Steps](#procedure-steps)
   - [Step Types](#step-types)
@@ -61,15 +61,74 @@ A procedure is characterized by:
 - Steps of execution
 - Parameters
 
-## Copy a Procedure
+## Copying existing entities (COPYPROG / COPYREP / COPYFORM / COPYINTER)
 
-Use the **Copy Procedure** program to copy an existing procedure. It copies:
-- All procedure steps
-- All parameters
-- All step queries and procedure messages
-- Any designated target forms
+**When the user says "copy", "duplicate", or "clone" a procedure / report / form / interface, invoke the matching Priority copier program. Do NOT rebuild the entity by hand with `INSERT INTO EXEC`, trigger-by-trigger SQL, or column-by-column WebSDK.** The copiers preserve metadata that manual reconstruction misses (step queries, parameters, triggers, message text, column joins).
 
-It does **not** copy: output title, links to menus/forms/other procedures.
+The four copiers are standard Priority procedures, verifiable via SQLI:
+
+```sql
+SELECT ENAME, TITLE, TYPE FROM EXEC
+WHERE ENAME IN ('COPYPROG','COPYREP','COPYFORM','COPYINTER') AND TYPE = 'P'
+FORMAT;
+```
+
+| Program     | Copies          | Ships as | Related generator form |
+|-------------|-----------------|----------|------------------------|
+| `COPYPROG`  | Procedure       | TYPE='P' | `EPROG` (Procedure Generator — **not** `EPROC`) |
+| `COPYREP`   | Report          | TYPE='P' | `EREP` (Report Generator) |
+| `COPYFORM`  | Form            | TYPE='P' | `EFORM` (Form Generator) |
+| `COPYINTER` | Interface       | TYPE='P' | `EINTER` (Interface Generator) |
+
+> **System forms are off-limits.** Copying a standard (non-custom-prefix) form is **forbidden** — the only exception is the user-report-generator form (`ASSETREP` → your prefix) documented in `reports.md` § "Create Your Own Generator". Never copy `ORDERS`, `AINVOICES`, `EFORM`, etc. Do copy your own `XXXX_*` custom entities.
+
+### What each copier carries over
+
+- `COPYPROG` — all procedure steps, parameters, step queries, procedure messages, designated target forms. Does **not** copy the output title or links to menus / forms / other procedures.
+- `COPYREP` — report columns (with revised titles / group-by / input flags), joins, conditions, optimization. Relink to menus after copying.
+- `COPYFORM` — form columns, triggers, sub-level links, FCLMNA expressions. For generator-form copies (`ASSETREP` pattern), you still need to edit the PRE-FORM trigger's prefix variable and the `LIKE '<prefix>%'` expressions — see `reports.md`.
+- `COPYINTER` — load-target, GENERALLOAD column mappings, INTERCLMNS rows.
+
+### Invocation — three paths
+
+The copiers are TYPE='P' with no parent form, so they are run top-level (not via `activateStart` on a generator form). Pick the path that matches the environment:
+
+1. **Priority UI (Windows / Web)** — preferred when the user is at the keyboard.
+   - Windows client: **Tools → Run Entity (Advanced…)** → enter `COPYPROG` (or `COPYREP` / `COPYFORM` / `COPYINTER`).
+   - Web client: **Run → Run Entity (Advanced…)** → same.
+   - Priority prompts for **Source** (existing entity name) and **Target** (new name — must respect the four-letter prefix rule for custom entities, e.g., `XXXX_NEWPROC`).
+
+2. **Command line (server shell or Priority CLI).** Exactly the pattern `reports.md` already uses for generator forms:
+   ```
+   WINPROC -P COPYPROG
+   WINPROC -P COPYREP
+   WINPROC -P COPYFORM
+   WINPROC -P COPYINTER
+   ```
+   Runs interactively; same source/target prompts as the UI.
+
+3. **WebSDK child script (programmatic).** The bridge's `websdk_form_action` does not yet expose a standalone `procStart` / `inputFields` op — `activateStart` only works inside a form context, and these copiers have no parent form. If you need to drive a copier from Claude Code autonomously today, either (a) ask the user to run it in the UI or CLI, or (b) request a new bridge compound op (spec: `{op: "copyEntity", kind: "proc"|"report"|"form"|"interface", source, target}` — analogous to `generateCompileScript` in `bridge/src/websdk/compounds.ts`, which chains `procStart('FORMPREP','P') → inputOptions → inputFields`). The underlying WebSDK calls are:
+   ```js
+   // Inside a child script run via a bridge compound:
+   let proc = await priority.procStart('COPYPROG', 'P');       // or COPYREP / COPYFORM / COPYINTER
+   // Each input step surfaces as proc.type === 'inputFields'; drive it:
+   if (proc.type === 'inputFields') {
+     proc = await proc.proc.inputFields(1, { EditFields: [
+       { field: 1, op: 0, value: '<SOURCE_NAME>', op2: 0, value2: '' }
+     ]});
+   }
+   if (proc.type === 'inputFields') {
+     proc = await proc.proc.inputFields(1, { EditFields: [
+       { field: 1, op: 0, value: '<TARGET_NAME>', op2: 0, value2: '' }
+     ]});
+   }
+   // proc.type === 'message' (success) or 'displayUrl' (error report) terminates the flow.
+   ```
+   The exact number of `inputFields` steps and any intervening `inputOptions` (radio buttons) differs per copier — trace it on first run. See `compounds.ts` → `generateCompileScript` for a verified end-to-end example of the procStart+inputFields pattern.
+
+### Don't: symptoms of re-inventing the copier
+
+If you find yourself running `INSERT INTO EXEC (ENAME, TITLE, TYPE, EDES) VALUES ...` followed by hand-rebuilding steps / parameters / triggers — stop. Use `COPYPROG` / `COPYREP` / `COPYFORM` / `COPYINTER` instead and then diff the copy for the custom tweaks you actually wanted. `common-mistakes.md` has a quick-lookup entry for this.
 
 ## Procedure Attributes
 

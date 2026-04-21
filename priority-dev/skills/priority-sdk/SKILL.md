@@ -173,6 +173,9 @@ Read `references/forms.md` for form setup, then `references/triggers.md` for tri
 ### Write a procedure with user input
 Read `references/procedures.md` > User Input section, then see `examples/procedure-examples.sql`.
 
+### Copy a procedure / report / form / interface
+Do **not** rebuild the entity by hand. Use the matching Priority copier: `COPYPROG` (proc), `COPYREP` (report), `COPYFORM` (form), `COPYINTER` (interface). Read `references/procedures.md` > "Copying existing entities (COPYPROG / COPYREP / COPYFORM / COPYINTER)" for invocation paths (UI, `WINPROC -P`, or WebSDK `procStart`+`inputFields`).
+
 ### Generate a document (PDF/print)
 Read `references/documents.md` > WINHTML section, then see `examples/procedure-examples.sql` for WINHTML patterns.
 
@@ -242,6 +245,9 @@ To find specific content in reference files, search for these patterns:
 | Form metadata tables | `FORMCLMNS\|FORMTRIG\|FORMCLTRIGTEXT\|HIDEBOOL\|HIDE` | `references/websdk-cookbook.md` |
 | Text subform recipe (6-call) | `Text Subform Creation\|TEXTFORM\|EDES.*LOG\|FCLMNA.*EXPR` | `references/websdk-cookbook.md` |
 | Find form internal ID | `Find a form's internal ID\|EXEC FROM EXEC` | `references/websdk-cookbook.md` |
+| Copy entity (proc/report/form/interface) | `COPYPROG\|COPYREP\|COPYFORM\|COPYINTER\|WINPROC -P` | `references/procedures.md` |
+| Generator-form ENAMEs | `EPROG\|EREP\|EFORM\|EINTER\|Canonical generator-form names` | `references/websdk-cookbook.md` |
+| SELECT prints nothing | `Output Formats for SELECT\|FORMAT;\|Execution ok` | `references/sql-core.md`, `references/common-mistakes.md` |
 | Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|TAKEUPGRADE\|DOWNLOADUPG\|generate_shell` | `references/deployment.md` |
 | Direct activations | `FORMEXEC\|:\$\.PAR\|direct activation\|LINK.*TO.*:\$\.PAR` | `references/procedures.md`, `references/deployment.md` |
 | EDI internals | `INTERFORMS\|INTERCLMNSFILE\|EINTER\|INTERFACE.*-form` | `references/interfaces.md` |
