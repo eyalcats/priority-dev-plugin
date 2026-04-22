@@ -969,3 +969,56 @@ See `websdk-cookbook.md` § "Known bridge behaviors" for why.
 ### `filter` primitive — always `getRows` before `setActiveRow`
 
 Without an intermediate `getRows`, writes after `filter` land on the wrong parent (EFORM's own meta-form). Use primitives explicitly; avoid the compound `createTrigger`, which has the same bug.
+
+### FCLMNA.EXPR for foreign-table lookups: `<TABLE> WHERE <key> = :$.<local_fk>`
+
+When an expression column pulls a display value from a joined foreign table, the `FCLMNA.EXPR` body uses a two-token shape that is NOT general SQL:
+
+```
+ACCOUNTS   WHERE ACCOUNT = :$.ACCOUNT
+COUNTRIES  WHERE COUNTRY = :$.FCOUNTRY
+TAXES      WHERE TAX     = :$.TAX
+```
+
+No `SELECT`. No `FROM`. The foreign-table name is the first token; the `WHERE` clause matches the foreign key column (left side) to the local form column holding the FK value (right side, via `:$.<col>`). The column being returned is whichever `CNAME` sits on the parent `FCLMN` row.
+
+Common mistakes:
+- Writing `SELECT COUNTRYNAME FROM COUNTRIES WHERE …` → parse error (`FCLMNA.EXPR` is scalar-only; no sub-SELECTs — see "scalar-only" notes elsewhere in this file).
+- Putting both names as `:$.<name>` on each side — the left must be the literal foreign column name, not a variable reference.
+- Expecting column names to match — they don't need to. In LOGPART, `FTIP_COUNTRYNAME` uses `COUNTRIES WHERE COUNTRY = :$.FCOUNTRY` (local column is `FCOUNTRY`, foreign key is `COUNTRY`).
+
+Use this shape for any "display a column from a joined table" expression-column setup. The alternative — a real join through `JTNAME`/`JCNAME` on the base-column row plus an imported column — is still preferred when the picker UI is wanted (see "Foreign-Key Pickers: the join IS the picker"). The FCLMNA.EXPR shape is for columns that are expression-only (`EXPRESSION=Y`, no base-table storage).
+
+*(seen in: LOGPART + ~40 more forms via `FORMCLMNSA.EXPR LIKE '% WHERE % =%' AND EXPR NOT LIKE '%SELECT%' AND EXPR NOT LIKE '%FROM%'`)*
+
+### Shared trigger libraries via `#INCLUDE func/<Name>`
+
+Priority ships a `func` namespace (form with `ENAME = 'func'`) that holds reusable trigger bodies. Consumer forms seed input variables, pull the body via `#INCLUDE func/<Routine>`, then read output variables from the routine:
+
+```sql
+#INCLUDE func/Language
+#INCLUDE func/DecimalPrecision
+#INCLUDE func/CheckTax
+#INCLUDE func/CheckRestricted
+#INCLUDE func/LoadAppCond
+```
+
+No arguments, no return value — pure variable-passing contract. Check an existing consumer (e.g. ORDERS PRE-FORM) for the exact var names each routine expects.
+
+Cross-form hygiene checks follow the same pattern but live on an authoritative form rather than the `func` library: `#INCLUDE ORDERS/BUF12 /* check NS customer */`, `#INCLUDE CPROF/BUF11 /* check cust<->plist */`, etc. The comment after the include names the concern — keep it when copying.
+
+*(seen in: ~250 forms via `FORMTRIGTEXT LIKE '%#INCLUDE func/%'`; cross-form BUF<n> pattern in ORDERS, CPROF, CINVOICES, CUSTOMERS and ~40 more)*
+
+### Hidden DUMMY/DUMMY/DUMMY scaffolding column
+
+A `FCLMN` row with `NAME=DUMMY`, `CNAME=DUMMY`, `TNAME=DUMMY`, `TYPE=INT`, `HIDEBOOL=Y` (and usually `ORD=1`) is a scaffolding primitive for attaching conditional blocks or record-level conditions without disturbing the real base-table columns. The `DUMMY` "table" is Priority's single-row constant table — nothing is read or written, it just gives the form somewhere to hang an `FCLMNA.EXPR` or a condition clause.
+
+*(seen in: LOGPART + ~40 more forms via `FORMCLMNS WHERE NAME='DUMMY' AND HIDE='Y'`)*
+
+### Expression + READONLY=M for computed display columns
+
+Custom forms routinely pair `EXPRESSION='Y'` with `READONLY='M'` (modify-only, not insert) to implement derived display columns that are computed by a CHOOSE/FIELD or POST-FIELD trigger on save but cannot be re-typed at insert time. `READONLY='R'` (forever read-only) is the alternative when the column is pure-display. Combining with `TRIGGERS='Y'` enables the trigger surface used to recompute the value.
+
+Common mistake: pairing `READONLY='M'` with `HIDEBOOL='Y'` — they conflict, don't combine them.
+
+*(seen in: LOGPART, SOF_FORMS, SOF_MANAGEPASS + 100 more forms via `FORMCLMNS WHERE EXPRESSION='Y' AND READONLY='M'`)*

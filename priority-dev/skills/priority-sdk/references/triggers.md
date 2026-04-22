@@ -982,3 +982,118 @@ Hebrew error `ערך קיים במסך 'X'` names the blocking subform — peel 
 ### FORMPREPERRS accumulates stale errors
 
 FORMPREPERRS is readable via WebSDK but entries accumulate across compile attempts. "Could not read ERRMSGS" reports the same whether the current compile succeeded or failed. Authoritative compile-success signal is the bridge's `prepareForm` status + a post-compile `getRows` on the form itself, not FORMPREPERRS content.
+
+## 12. Canonical form-trigger idioms
+
+Patterns observed across many standard Priority forms. Use these exact shapes — they are the "house style" the existing codebase follows, and reviewers recognise deviations quickly.
+
+### PRE-FORM: load system/logistics/finance constants
+
+Zero-init each destination variable first, then `SELECT VALUE INTO :var FROM SYSCONST|LOGCONST|FNCCONST WHERE NAME = '<CONST>';`. Zero-init guarantees a defined value when the constant row is absent (not every tenant has every constant). `ROUND(VALUE)` when the constant is INT-typed.
+
+```sql
+/* PRE-FORM excerpt — ORDERS */
+:PORTALONLY = 0;
+SELECT VALUE INTO :PORTALONLY FROM SYSCONST
+WHERE NAME = 'PORTALONLY';
+
+:PROJORDCOST = 0;
+SELECT ROUND(VALUE) INTO :PROJORDCOST FROM LOGCONST
+WHERE NAME = 'PROJORDCOST';
+
+:CREDITADDTAX = :CREDITORDERS = 0;
+SELECT ROUND(VALUE) INTO :CREDITADDTAX FROM FNCCONST
+WHERE NAME = 'CREDITADDTAX';
+```
+
+*(seen in: ORDERS + 28 more forms via `FORMTRIGTEXT LIKE '%SELECT VALUE INTO %FROM SYSCONST%'`)*
+
+### PRE-FORM: resolve target-form EXEC ids for dynamic zoom
+
+When a source form drives a multi-target zoom (see `forms.md` § "Dynamic Access (ZOOM1 pattern)"), PRE-FORM pre-loads each target's `EXEC` into a form-scoped variable. The `ZOOM1` column's ternary then references those via the `0 + :VAR` idiom at runtime.
+
+```sql
+/* one line per target form */
+SELECT EXEC INTO :CPROFEXEC FROM EXEC
+WHERE ENAME = 'CPROF'       AND TYPE = 'F';
+SELECT EXEC INTO :ORDEXEC   FROM EXEC
+WHERE ENAME = 'ORDERS'      AND TYPE = 'F';
+SELECT EXEC INTO :AINVEXEC  FROM EXEC
+WHERE ENAME = 'AINVOICES'   AND TYPE = 'F';
+```
+
+*(seen in: LOGFILE, ORDERS, WTASKDOCS, DLVTRACKITEMS + ~35 more forms via `FORMTRIGTEXT LIKE '%SELECT EXEC INTO %FROM EXEC WHERE ENAME%'`)*
+
+### PRE-FORM: typed zero literals for money/quantity precision
+
+Zero-init REAL variables used in money or shifted-integer arithmetic with the explicit-precision form `0e-5` / `0e-6` (and `0.0` for generic REAL). Using plain `0` infers INT and rounds mid-expression before the precision shift takes effect.
+
+```sql
+:PRICE = 0e-5;
+:QPRICE = :VAT = :TOTPRICE = :PERCENT = 0e-6;
+```
+
+*(seen in: ORDERS, FOBORDERS, FOBPROF via `FORMTRIGTEXT LIKE '%= 0e-5%'`)*
+
+### Dynamic ZOOM via one-line #INCLUDE
+
+Transaction forms that enable dynamic-zoom behaviour pull shared boilerplate by including `FNCTRANS/PRE-FORM` as the first line of their own PRE-FORM, rather than re-implementing the EXEC-resolver logic locally.
+
+```sql
+#INCLUDE FNCTRANS/PRE-FORM /* dynamic ZOOM */
+```
+
+*(seen in: ORDERS + 21 more forms via `FORMTRIGTEXT LIKE '%#INCLUDE FNCTRANS/PRE-FORM%'`)*
+
+### Batch-safe trigger gating via :INTERFACEIGNOREWARNINGS
+
+Row triggers (PRE-INSERT / PRE-UPDATE) that raise user-facing warnings should wrap warning-only checks in a `GOTO N WHERE :INTERFACEIGNOREWARNINGS = 1; ... LABEL N;` block. INTERFACE loads and REST-API callers set `:INTERFACEIGNOREWARNINGS` to `1` to opt out of interactive guards while still running hard ERRMSG checks.
+
+```sql
+GOTO 1 WHERE :INTERFACEIGNOREWARNINGS = 1;
+#INCLUDE ORDERS/BUF39
+:ACCOUNT = :$.ACCOUNT;
+#INCLUDE ORDERS/BUF40 /* deviation from approved credit */
+WRNMSG 204 WHERE :$.PROCEEDCREDITDEV = 'N';
+LABEL 1;
+```
+
+Pair with `:FORM_INTERFACE = 1` (detect interface-driven writes) and `:FORM_INTERFACE_NAME <> ''` (detect named EDI), both covered in `examples/trigger-examples.sql`.
+
+*(seen in: ORDERS, AINVOICES, IVPACK, TRANSORDER_D, TRANSORDER_T, TRANSORDER_C, WAREHOUSES, PRDISINGLE, DOCUMENTS_D, SERIAL via `FORMTRIGTEXT LIKE '%:INTERFACEIGNOREWARNINGS%'`)*
+
+### Async fire-and-continue: SQL.TMPFILE → LINK → single-row INSERT → EXECUTE WINACTIV '-P' → UNLINK
+
+To queue a procedure against the row the user just saved from inside a POST-INSERT / POST-UPDATE trigger, create a tempfile, LINK the base table, INSERT the one row matching `:$.<KEY>`, dispatch via `EXECUTE WINACTIV '-P', <PROC>, <TABLE>, :TMP`, then UNLINK. The linked file arrives at the target procedure as `:$.PAR` (see `procedures.md` § "Direct activations").
+
+```sql
+:TMPFILE = '';
+SELECT SQL.TMPFILE INTO :TMPFILE FROM DUMMY;
+LINK ORDERS TO :TMPFILE;
+GOTO 7790 WHERE :RETVAL <= 0;
+INSERT INTO ORDERS
+SELECT * FROM ORDERS ORIG
+WHERE ORIG.ORD = 0 + :$.ORD;
+EXECUTE WINACTIV '-P', 'SOF_CREATEWAVEPIKORD',
+  'ORDERS', :TMPFILE;
+UNLINK ORDERS;
+LABEL 7790;
+```
+
+Use `ACTIVATF` (not `WINACTIV`) for web/server-side execution where no UI is attached — `WINACTIV` only works in the Windows client.
+
+*(seen in: ORDERS, DLVTRACKS, ENVCONFIGURATION, ADCSLSCONTROLLER via `FORMTRIGTEXT LIKE '%EXECUTE WINACTIV%-P%'`)*
+
+### Multi-assign from form buffer via SELECT … INTO … FROM DUMMY
+
+POST-FIELD triggers that need several local vars populated from the current form row do it in one `SELECT :$.col1, :$.col2, … INTO :v1, :v2, … FROM DUMMY;` statement rather than N individual `:v = :$.col;` assignments. Cheaper, and keeps the reads atomic against any intervening trigger side-effects.
+
+```sql
+:TAX = :AGENT = :AGENT2 = 0;
+SELECT :$.CUSTAGENT, :$.CUSTAGENT2, :$.CUSTPAY, :$.PAYCUST,
+ :$.CUSTTAX, :$.CUSTBRANCH
+INTO :AGENT, :AGENT2, :PAY, :PAYCUST, :TAX, :CUSTBRANCH
+FROM DUMMY;
+```
+
+*(seen in: TRANSORDER_P, FOBDOC, YINVOICES, WTASKITEMS, PRDISINGLE, PORDERITEMS, TRANSORDER_J, DOCUMENTS_P, PRDPART, DOCUMENTS_W, PRDITEMS via column-trigger scan on `FORMCLTRIGTEXT`)*

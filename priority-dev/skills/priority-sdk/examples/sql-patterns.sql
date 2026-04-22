@@ -623,3 +623,32 @@ ENV 'company_name';
 /* --- EXECUTE: Run a program with parameters --- */
 EXECUTE BACKGROUND WINFORM 'ORDERS', '', :ORDNAME, '', '2';
 /* BACKGROUND runs the program in the background */
+
+
+/*=====================================================================
+ * HARVESTED FORM-SHAPE IDIOMS (2026-04-22)
+ * See references/forms.md for prose.
+ *=====================================================================*/
+
+-- FCLMNA.EXPR foreign-table lookup. Distilled from: LOGPART + ~40 more forms.
+-- Query: FORMCLMNSA.EXPR LIKE '% WHERE % =%' AND NOT LIKE '%SELECT%' AND NOT LIKE '%FROM%'
+-- These are LITERAL FCLMNA.EXPR bodies — no SELECT, no FROM, and the column
+-- returned is inferred from the parent FCLMN row's CNAME.
+-- Store these via WebSDK:
+--   startSubForm(FCLMN) → filter(NAME, <col>) → setActiveRow → startSubForm(FCLMNA)
+--   → newRow → fieldUpdate(EXPR, '<table> WHERE <fk_col> = :$.<local_col>')
+--   → saveRow
+--
+-- Example bodies (as stored in FCLMNA.EXPR):
+--   ACCOUNTS   WHERE ACCOUNT = :$.ACCOUNT
+--   COUNTRIES  WHERE COUNTRY = :$.FCOUNTRY
+--   TAXES      WHERE TAX     = :$.TAX
+
+
+-- Shared trigger libraries via #INCLUDE func/<Name>. Distilled from: ~250 forms.
+-- Query: FORMTRIGTEXT LIKE '%#INCLUDE func/%'
+#INCLUDE func/Language
+#INCLUDE func/DecimalPrecision
+#INCLUDE func/CheckTax
+#INCLUDE func/CheckRestricted
+#INCLUDE func/LoadAppCond

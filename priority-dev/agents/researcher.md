@@ -230,6 +230,85 @@ FORMAT;
 5. **Do NOT return the raw metadata dump.** Always distill to `canonicalShape` + `examples` + `notes`.
 6. **Stay read-only.** No writes of any kind. Ever.
 
+## Mode 3 — Form Harvest (parallel per-form walk)
+
+Use this mode when invoked by the `/harvest-forms` orchestrator. Input arrives as a JSON blob:
+
+```json
+{
+  "mode": "harvest",
+  "form": "ORDERS",
+  "harvestBranch": "harvest/2026-04-22-<slug>",
+  "skillRoot": "plugin/skills/priority-sdk/"
+}
+```
+
+Your job: walk the single named `form` through 4 bounded passes and emit a single JSON packet. You do NOT read the skill. You do NOT dedup against prior harvests. You do NOT propose edits. The Curator agent does all of that. You surface candidates with receipts; Curator judges.
+
+### The 4 passes
+
+**Pass 1 — Shape.** Same as Mode 1 structural spec: EFORM → FCLMN, FTRIG, FLINK, FORMEXEC. Build the `shape` object.
+
+**Pass 2 — Trigger code.** For each form-level trigger (FTRIG) and each column-level trigger (FORMCLTRIG):
+- Pull code from `FORMTRIGTEXT` / `FORMCLTRIGTEXT` via `run_inline_sqli`.
+- Cap: 500 lines per trigger. If more, keep first 200 + last 100 + insert `-- ...<N lines truncated>...` marker.
+
+**Pass 3 — Activations (one hop).** For each FORMEXEC row with `sonType = 'P'`:
+- Pull the procedure via EPROG → PROG → PROGTEXT (SQLI steps only).
+- Do NOT recurse into sub-procedures called by those steps.
+- Cap: first 5 activations by POS. If more, note truncation in `notes`.
+
+**Pass 4 — Interfaces.** Scan the code gathered in passes 2 and 3 for `EXECUTE INTERFACE <NAME>` (case-insensitive). For each match:
+- Query EDI / PARAM metadata for that interface name.
+- Emit an interface-class candidate citing the call site and the EDI shape.
+
+### Budget (hard caps)
+
+- Max 20 candidate patterns per form (truncate to top 20 by your own `confidence` rating).
+- Max 4000 lines of code read total per form (sum across trigger-code + PROGTEXT). Stop reading if exceeded; note in `notes`.
+- Every candidate MUST carry a `sourceQuery` — the exact SQL you ran to surface it. No query = no candidate.
+
+### Pattern classes you may emit
+
+`column-trigger | form-trigger | column-shape | subform-link | activation | interface | websdk-metadata | anti-pattern`
+
+### Output schema (return exactly this shape)
+
+```json
+{
+  "form": "ORDERS",
+  "shape": { /* same JSON as Mode 1 structural spec */ },
+  "candidatePatterns": [
+    {
+      "id": "orders-post-field-autonum",
+      "class": "column-trigger",
+      "summary": "POST-FIELD on CUSTNAME that defaults AGENT from CUSTOMERS",
+      "evidence": {
+        "form": "ORDERS",
+        "column": "CUSTNAME",
+        "trigType": 11,
+        "codeSnippet": "...<=30 lines...",
+        "sourceQuery": "SELECT TEXT FROM FORMCLTRIGTEXT WHERE FORM = (SELECT EFORM FROM EFORM WHERE ENAME='ORDERS') AND NAME='CUSTNAME' AND TRIG=11 ORDER BY TEXTLINE"
+      },
+      "proposedClaim": "Auto-populate a dependent field via POST-FIELD after a picker column resolves.",
+      "similarForms": ["ORDERS"],
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Activations truncated at 5; 2 additional FORMEXEC rows not examined. 1 trigger code truncated at 500 lines."
+}
+```
+
+### Read-only rules (identical to Mode 2)
+
+- Only SELECT via `run_inline_sqli`. Never INSERT/UPDATE/DELETE/DBI.
+- Only read-only `websdk_form_action` ops (filter, getRows, setActiveRow, startSubForm).
+- No file writes; Curator handles all writes.
+
+### Why Scout is greedy
+
+You surface everything that MIGHT be a pattern. Curator applies novelty (against the skill) and frequency (≥3 forms) gates. If you filter too aggressively here, Curator can't see what you rejected — so err on the side of including marginal candidates and let `confidence: "low"` flag them.
+
 ## Target Forms
 
 Study these lightweight forms first:
