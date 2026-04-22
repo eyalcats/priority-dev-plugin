@@ -139,7 +139,9 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 
 | File | Contents |
 |------|----------|
-| **`references/advanced-programming.md`** | WSCLIENT (REST/OAuth2/SOAP 25.1+), XMLPARSE, JSONPARSE, SFTPCLNT, FILTER, WINAPP, WINRUN, Dynamic SQL, Semaphores, Click2Sign |
+| **`references/integrations.md`** | WSCLIENT (REST/OAuth2/SOAP 25.1+), XMLPARSE, JSONPARSE, SFTPCLNT, WINAPP, WINRUN, SHELLEX, Activate Priority from External Application |
+| **`references/file-operations.md`** | COPYFILE/MOVEFILE/DELWINDOW/MAKEDIR/GETDATE/GETSIZE, FILELIST, FILTER (text replace + encoding + base64), CRPTUTIL encryption, PREXFILE (print attachments), Click2Sign, TABINI (client INI) |
+| **`references/advanced-sqli.md`** | Run procedure/report from SQLI (WINACTIV/ACTIVATE/ACTIVATF), Financial Documents hooks (PREENAME/CONTENAME), Open Form Record from Procedure, Dynamic SQL, Semaphores, Word Templates for Specific Records, Business Rules Generator |
 | **`references/debugging.md`** | Debug flags (-trc), optimization, logging, revisions, VSCode extension, HEAVYQUERY, **Claude Code MCP integration** |
 | **`references/vscode-bridge-examples.md`** | VSCode bridge tool usage examples: get_current_file, write_to_editor, refresh_editor, run_windbi_command (38 commands), common workflows (read→edit→compile, inspect, scaffold, search, ad-hoc queries) |
 | **`references/websdk-cookbook.md`** | **WebSDK tested patterns**: operation property reference (including `filter` with `operator` for LIKE/>=/<= searches), `filter` vs `search` distinction, common mistakes, copy-paste recipes (read/hide/add columns, expressions, triggers, compile), SQLI metadata queries (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT), EFORM alias→real table mapping |
@@ -187,10 +189,10 @@ Read `references/documents.md` > WINHTML section, then see `examples/procedure-e
 Read `references/interfaces.md` > Load Table Pattern and Form Load Execution sections, then see `examples/interface-examples.sql`.
 
 ### Call a REST API
-Read `references/advanced-programming.md` > WSCLIENT section, then see `examples/webservice-examples.sql`.
+Read `references/integrations.md` > WSCLIENT section, then see `examples/webservice-examples.sql`.
 
 ### Parse XML or JSON response
-Read `references/advanced-programming.md` > XML/JSON Parsing sections, then see `examples/webservice-examples.sql`.
+Read `references/integrations.md` > XML/JSON Parsing sections, then see `examples/webservice-examples.sql`.
 
 ### Debug a form or procedure
 Read `references/debugging.md` > Debug Tools section for the `-trc` flag syntax.
@@ -199,7 +201,16 @@ Read `references/debugging.md` > Debug Tools section for the `-trc` flag syntax.
 Read `references/tables-and-dbi.md` > DBI Syntax section, then see `examples/sql-patterns.sql`.
 
 ### Transfer files via SFTP
-Read `references/advanced-programming.md` > SFTP section, then see `examples/webservice-examples.sql`.
+Read `references/integrations.md` > SFTP section, then see `examples/webservice-examples.sql`.
+
+### Run external programs (WINAPP/WINRUN) or copy/move/delete files
+Read `references/integrations.md` > External Program Invocation for WINAPP/WINRUN/SHELLEX, or `references/file-operations.md` > File Management Utilities for COPYFILE/MOVEFILE/DELWINDOW.
+
+### Use semaphores, dynamic SQL, or run a procedure/report from SQLI
+Read `references/advanced-sqli.md` — procs/reports via WINACTIV/ACTIVATE/ACTIVATF, Dynamic SQL, LASTS-table and time-based semaphores.
+
+### Encrypt data, print attachments, or base64-encode a file
+Read `references/file-operations.md` — CRPTUTIL for encryption, PREXFILE for attachments, FILTER > Base64 section.
 
 ### Connect via Web SDK (JavaScript)
 Read `references/web-cloud-dashboards.md` > Web SDK Common Issues section, then see `examples/websdk-examples.js`.
@@ -234,10 +245,16 @@ To find specific content in reference files, search for these patterns:
 | WINHTML | `WINHTML\|-d\|-dQ` | `references/documents.md` |
 | Interface params | `EXECUTE INTERFACE` | `references/interfaces.md` |
 | GENERALLOAD | `GENERALLOAD` | `references/interfaces.md` |
-| WSCLIENT | `WSCLIENT` | `references/advanced-programming.md` |
-| JSON body for WSCLIENT | `JSON.*body\|ASCII.*BODYFILE\|STRCAT.*JSON` | `references/advanced-programming.md`, `examples/webservice-examples.sql` |
-| XMLPARSE | `XMLPARSE\|JSONPARSE` | `references/advanced-programming.md` |
-| SFTPCLNT | `SFTPCLNT` | `references/advanced-programming.md` |
+| WSCLIENT | `WSCLIENT` | `references/integrations.md` |
+| JSON body for WSCLIENT | `JSON.*body\|ASCII.*BODYFILE\|STRCAT.*JSON` | `references/integrations.md`, `examples/webservice-examples.sql` |
+| XMLPARSE | `XMLPARSE\|JSONPARSE` | `references/integrations.md` |
+| SFTPCLNT | `SFTPCLNT` | `references/integrations.md` |
+| WINAPP / WINRUN / SHELLEX | `WINAPP\|WINRUN\|SHELLEX` | `references/integrations.md` |
+| COPYFILE / MOVEFILE / FILELIST / FILTER | `COPYFILE\|MOVEFILE\|FILELIST\|EXECUTE FILTER` | `references/file-operations.md` |
+| CRPTUTIL (encryption) | `CRPTUTIL` | `references/file-operations.md` |
+| PREXFILE (print attachments) | `PREXFILE` | `references/file-operations.md` |
+| Dynamic SQL / Semaphores | `EXECUTE SQLI\|LASTS` | `references/advanced-sqli.md` |
+| Run proc/report from SQLI | `ACTIVATF\|WINACTIV\|ACTIVATE` | `references/advanced-sqli.md` |
 | Debug | `-trc\|DEBUGSQL\|HEAVYQUERY` | `references/debugging.md` |
 | Dashboard | `WINHTMLH\|HTMLCURSOR` | `references/web-cloud-dashboards.md` |
 | Web SDK | `CORS\|Connection\|PAT\|reportOptions\|getRows\|displayURL` | `references/web-cloud-dashboards.md` |

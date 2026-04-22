@@ -152,7 +152,9 @@ plugin/skills/priority-sdk/references/reports.md
 plugin/skills/priority-sdk/references/interfaces.md
 plugin/skills/priority-sdk/references/common-mistakes.md
 plugin/skills/priority-sdk/references/websdk-cookbook.md
-plugin/skills/priority-sdk/references/advanced-programming.md
+plugin/skills/priority-sdk/references/advanced-sqli.md
+plugin/skills/priority-sdk/references/file-operations.md
+plugin/skills/priority-sdk/references/integrations.md
 plugin/skills/priority-sdk/references/pattern-mining-recipes.md
 plugin/skills/priority-sdk/examples/sql-patterns.sql
 plugin/skills/priority-sdk/examples/trigger-examples.sql
