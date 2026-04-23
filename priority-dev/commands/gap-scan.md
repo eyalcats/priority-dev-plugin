@@ -29,12 +29,12 @@ If empty: stop and print `/gap-scan ENTITY1 ENTITY2 [...] — needs at least one
 For each argument, resolve via `run_inline_sqli`:
 
 ```sql
-SELECT ENAME, ETYPE FROM EXEC WHERE ENAME = '<entity>' FORMAT;
+SELECT ENAME, TYPE FROM EXEC WHERE ENAME = '<entity>' FORMAT;
 ```
 
 If zero rows for any entity, STOP and report the unresolved names. Do not proceed.
 
-Store the `ETYPE` map for use in the report slug and summary.
+Store the `TYPE` map for use in the report slug and summary. (Column name is `TYPE` on EXEC, not `ETYPE` — ETYPE is on FORMEXEC/PROCSTEP/REPSTEP, different tables.)
 
 ## Step 2 — Ensure clean working tree on main
 

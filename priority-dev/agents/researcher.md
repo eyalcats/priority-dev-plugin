@@ -333,16 +333,16 @@ Activate this mode when the invoker's prompt JSON includes `"mode": "gap-scout"`
 ### Step 1 — Detect entity type
 
 ```sql
-SELECT ETYPE FROM EXEC WHERE ENAME = ':entity' FORMAT;
+SELECT TYPE FROM EXEC WHERE ENAME = ':entity' FORMAT;
 ```
 
-ETYPE: `F` form, `P` procedure, `R` report. If no rows come back, append one candidate with `classification: not-found` and return.
+TYPE: `F` form, `P` procedure, `R` report. The column on the `EXEC` table is `TYPE`, NOT `ETYPE` (ETYPE is a column on FORMEXEC/PROCSTEP/REPSTEP, different tables). If no rows come back, append one candidate with `classification: not-found` and return.
 
 ### Step 2 — Load the skill's current coverage
 
 Read the references and examples keyed to entity type BEFORE scanning code, so "what's already covered" is in your context:
 
-| ETYPE | Read |
+| TYPE | Read |
 |---|---|
 | F | `references/forms.md`, `references/triggers.md`, `references/common-mistakes.md`, `examples/trigger-examples.sql` |
 | P | `references/procedures.md`, `references/advanced-sqli.md`, `references/interfaces.md`, `examples/procedure-examples.sql`, `examples/interface-examples.sql` |
@@ -354,12 +354,12 @@ Run metadata queries per entity type. All SELECTs MUST end with `FORMAT` (bridge
 
 **Forms:**
 ```sql
-SELECT TRIG, TEXT FROM FORMTRIGTEXT WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
-SELECT NAME, TRIG, TEXT FROM FORMCLTRIGTEXT WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
+SELECT TRIG, TEXTLINE, TEXT FROM FORMTRIGTEXT WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') ORDER BY TRIG, TEXTLINE FORMAT;
+SELECT NAME, TRIG, TEXTLINE, TEXT FROM FORMCLTRIGTEXT WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') ORDER BY NAME, TRIG, TEXTLINE FORMAT;
 SELECT NAME, EXPR FROM FORMCLMNSA WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
-SELECT ETYPE, RUN, POS FROM FORMEXEC WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
-SELECT FNAME, TITLE FROM FLINK WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
 ```
+
+`FORMEXEC` (direct activations) and `FLINK` (sub-level links) are EFORM subforms — not queryable via raw SQLI, only via WebSDK `startSubForm` (see `references/websdk-cookbook.md`). Mode 4 mines code-level patterns only, so structural activations/sub-levels are out of scope; skip them.
 
 **Procedures:** verify table/column names via `displayTableColumns` on `PROCSTEP`, `PROCQUERYTEXT`, `PROCSTEPTEXT`, `PROCIO` before running — the spec flagged these as representative, not authoritative. Adjust your queries to the actual schema.
 
