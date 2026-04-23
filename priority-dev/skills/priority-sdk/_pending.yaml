@@ -1,0 +1,5 @@
+# Staged candidate skill improvements awaiting consolidation + approval.
+# Appended by Scouts (Mode 1: /gap-scan) and the learning-extractor (Mode 2: SessionEnd loop).
+# Drained by the curator (gap-curator mode) on approval or rejection.
+# Schema defined in docs/superpowers/specs/2026-04-23-gap-scan-design.md.
+candidates: []

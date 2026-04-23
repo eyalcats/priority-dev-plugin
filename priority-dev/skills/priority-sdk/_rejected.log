@@ -1,0 +1,2 @@
+# Append-only log of rejected findings with reasons.
+# Format: <ISO8601>\t<candidate-id>\t<classification>\t<pattern_name>\t<reason>

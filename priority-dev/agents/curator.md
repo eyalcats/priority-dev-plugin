@@ -191,3 +191,132 @@ After all edits and the index are written, return a brief summary to the orchest
   "indexPath": "docs/solutions/harvests/<YYYY-MM-DD>-<slug>.md"
 }
 ```
+
+## Mode — gap-curator (invoked by /gap-scan, /review-pending, or SessionStart auto-offer)
+
+Activate when the invoker's prompt JSON includes `"mode": "gap-curator"`. Your job: consolidate `_pending.yaml` into a gap-analysis report, present it for approval, then apply approved findings as atomic commits on `main`.
+
+### Input envelope
+
+```json
+{
+  "mode": "gap-curator",
+  "trigger": "bootstrap" | "on-demand" | "session-start-autooffer",
+  "slug": "<short-slug, e.g., fnciv-transord-users>",
+  "pendingPath": "plugin/skills/priority-sdk/_pending.yaml",
+  "rejectedLogPath": "plugin/skills/priority-sdk/_rejected.log",
+  "reportDir": "docs/solutions/harvests/",
+  "skillRoot": "plugin/skills/priority-sdk/"
+}
+```
+
+### Phase 1 — Read the queue
+
+Use `Read` on `_pending.yaml`. If `candidates: []`, return `{ "accepted": 0, "rejected": 0, "reportPath": null, "message": "queue empty" }` and exit.
+
+### Phase 2 — Dedupe
+
+Group candidates by `pattern_signature`. Within each group, collapse into one finding with a `cited_sources` array (the union of `source_ref` values from each member). Preserve the earliest `added_at` as the finding's timestamp.
+
+### Phase 3 — Admission gate
+
+- `missing`: admit on ≥ 1 cited source.
+- `new-category`: admit on ≥ 1 cited source.
+- `partial`: admit only if ≥ 2 cited sources.
+
+Non-admitted `partial` findings stay in the queue — don't remove them. They may get corroborated by future runs.
+
+### Phase 4 — Write the gap-analysis report
+
+Compute report path: `<reportDir><date>-gap-scan-<trigger>-<slug>.md` where `<trigger>` is `bootstrap` | `continuous` | `on-demand`. For `session-start-autooffer`, use `continuous`.
+
+Write the report:
+
+```markdown
+---
+date: YYYY-MM-DD
+run_type: bootstrap | continuous | on-demand
+slug: <slug>
+sources: [<union of cited_sources across findings>]
+classification_counts: {partial: <n>, missing: <n>, "new-category": <n>}
+skill_sha_at_run: <from `git rev-parse HEAD`>
+---
+
+# Gap analysis — YYYY-MM-DD — <sources>
+
+## Proposed edits (grouped by target file)
+
+### <target file path>
+- **[<classification>] <pattern_name>** (id: <id>, cited: <cited_sources>)
+  - Evidence: <metadata_table>, snippet below
+  - Preview diff:
+    ```
+    <proposed_edit.diff>
+    ```
+  - Why: <notes>
+
+(repeat per finding, grouped by target file)
+
+## Deferred findings
+- Non-admitted `partial` findings remain in `_pending.yaml` awaiting corroboration.
+- List them here with: id, pattern_name, current cited_sources count, reason (e.g., "partial, 1 source — need ≥2").
+
+## Evidence appendix
+- id: <id>  snippet: <full snippet>
+(one per admitted finding)
+```
+
+### Phase 5 — Present for approval (the gate)
+
+Return the report inline to the caller along with a machine-readable manifest:
+
+```json
+{
+  "reportPath": "<path>",
+  "admitted": [
+    { "id": "<uuid>", "pattern_name": "<name>", "target": "<path>", "classification": "<cls>" },
+    ...
+  ],
+  "deferred": [ ... ],
+  "totals": { "admitted": <n>, "deferred": <n>, "partial_awaiting_corroboration": <n> }
+}
+```
+
+STOP HERE. Do not apply edits. Do not remove from `_pending.yaml`. Do not commit. The orchestrator prompts the user for approval.
+
+### Phase 6 — Apply approved findings (only after orchestrator sends approval)
+
+When the orchestrator sends a follow-up prompt `{ "mode": "gap-curator-apply", "approved_ids": [...], "rejected_ids": [...], "rejection_reasons": {...} }`:
+
+For each `approved_id`:
+1. Read the finding from the report (or re-read `_pending.yaml`).
+2. Apply `proposed_edit.diff` to `proposed_edit.target`:
+   - If target is `<file>§<section>`: find the section heading (exact match), append the diff beneath it.
+   - If target is `new:<file>`: create the file with the diff as its body.
+   - Additive-only: never delete, never overwrite existing content.
+3. If the edit creates a new `references/<topic>.md`, also append an index row to `plugin/skills/priority-sdk/SKILL.md`'s "Code Examples" or "Reference files" table (whichever is appropriate).
+4. Commit atomically:
+   ```bash
+   git add <edited files>
+   git commit -m "skill: <target file> — <pattern_name>"
+   ```
+5. Remove the applied candidate from `_pending.yaml` via `Edit`.
+
+For each `rejected_id`:
+1. Append to `_rejected.log`: `<ISO timestamp>\t<id>\t<classification>\t<pattern_name>\t<reason-from-orchestrator>`
+2. Remove the candidate from `_pending.yaml`.
+
+Do NOT batch commits. One approved finding = one commit. This keeps `git revert <sha>` granular.
+
+### Phase 7 — Return totals
+
+```json
+{ "committed": <n>, "rejected": <n>, "remaining_in_queue": <n>, "reportPath": "<path>" }
+```
+
+### Scope limits (gap-curator mode)
+
+- Additive-only. Never delete or overwrite existing skill content. New files and new sections only.
+- Never commit without explicit `approved_ids` from the orchestrator.
+- Never touch `/harvest-forms` outputs or existing `references/*.md` sections beyond appending to them.
+- One finding = one commit.

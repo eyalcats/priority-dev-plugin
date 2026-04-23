@@ -314,3 +314,107 @@ You surface everything that MIGHT be a pattern. Curator applies novelty (against
 Study these lightweight forms first:
 - CURRENCIES, COUNTRIES, UNITNAME, WAREHOUSES (simple structure)
 - ORDERSTEXT (text subform pattern — proven working reference)
+
+## Mode 4 — Gap Scout (invoked by /gap-scan)
+
+Activate this mode when the invoker's prompt JSON includes `"mode": "gap-scout"`. Your job: for a single Priority entity, surface patterns present in the entity's code that the skill does not document, and append each surfaced pattern to `plugin/skills/priority-sdk/_pending.yaml`.
+
+### Input envelope
+
+```json
+{
+  "mode": "gap-scout",
+  "entity": "<ENAME>",
+  "skillRoot": "plugin/skills/priority-sdk/",
+  "pendingPath": "plugin/skills/priority-sdk/_pending.yaml"
+}
+```
+
+### Step 1 — Detect entity type
+
+```sql
+SELECT ETYPE FROM EXEC WHERE ENAME = ':entity' FORMAT;
+```
+
+ETYPE: `F` form, `P` procedure, `R` report. If no rows come back, append one candidate with `classification: not-found` and return.
+
+### Step 2 — Load the skill's current coverage
+
+Read the references and examples keyed to entity type BEFORE scanning code, so "what's already covered" is in your context:
+
+| ETYPE | Read |
+|---|---|
+| F | `references/forms.md`, `references/triggers.md`, `references/common-mistakes.md`, `examples/trigger-examples.sql` |
+| P | `references/procedures.md`, `references/advanced-sqli.md`, `references/interfaces.md`, `examples/procedure-examples.sql`, `examples/interface-examples.sql` |
+| R | `references/reports.md`, `references/sql-core.md`, `examples/sql-patterns.sql` |
+
+### Step 3 — Walk the entity's code
+
+Run metadata queries per entity type. All SELECTs MUST end with `FORMAT` (bridge requirement — the 2026-04-22 harvest run lost most trigger-text evidence when Scouts forgot it).
+
+**Forms:**
+```sql
+SELECT TRIG, TEXT FROM FORMTRIGTEXT WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
+SELECT NAME, TRIG, TEXT FROM FORMCLTRIGTEXT WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
+SELECT NAME, EXPR FROM FORMCLMNSA WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
+SELECT ETYPE, RUN, POS FROM FORMEXEC WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
+SELECT FNAME, TITLE FROM FLINK WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = ':entity') FORMAT;
+```
+
+**Procedures:** verify table/column names via `displayTableColumns` on `PROCSTEP`, `PROCQUERYTEXT`, `PROCSTEPTEXT`, `PROCIO` before running — the spec flagged these as representative, not authoritative. Adjust your queries to the actual schema.
+
+**Reports:** same verification step for `REPSTEP`, `REPINPUT`, `REPCOLS`.
+
+### Step 4 — Classify every distinct pattern observed
+
+For each pattern in the entity's code, classify against the skill docs loaded in Step 2:
+
+- `covered` — skill documents this. Do NOT stage. Count only.
+- `partial` — skill mentions without working example / key specifics.
+- `missing` — skill is silent.
+- `new-category` — pattern doesn't fit any existing reference file's scope.
+
+### Step 5 — Append each non-covered candidate to `_pending.yaml`
+
+Use the `Write`/`Edit` tools to append. Each candidate schema:
+
+```yaml
+  - id: <generate a uuid; Bash tool: node -e "console.log(require('node:crypto').randomUUID())">
+    added_at: <ISO 8601 timestamp; Bash tool: date -u +%Y-%m-%dT%H:%M:%SZ>
+    source_mode: bootstrap
+    source_ref: <entity ENAME>
+    classification: partial | missing | new-category
+    pattern_name: <short human label>
+    pattern_signature: <stable identity string, e.g., "dyn-zoom-logfile">
+    evidence:
+      metadata_table: <which table the snippet came from>
+      snippet: |
+        <up to 20 lines of code; truncate longer, mark with "... [truncated]">
+    proposed_edit:
+      target: <references/*.md §Section | examples/*.sql §Section | new:references/<topic>.md>
+      diff: |
+        <proposed addition>
+    notes: <1-3 sentences: why this is novel/partial/new-category>
+```
+
+If `_pending.yaml` has `candidates: []`, replace that line with `candidates:` and append under it. Keep a two-space indent for the `-`, four-space indent for nested fields, six-space indent for object-keyed sub-fields. Multiline strings use `|` with six-space body indent (eight-space for object-nested).
+
+### Step 6 — Return a summary
+
+Return to the orchestrator:
+
+```json
+{
+  "entity": "<entity>",
+  "etype": "F|P|R|not-found",
+  "staged": { "partial": <n>, "missing": <n>, "new-category": <n> },
+  "covered_count": <n>
+}
+```
+
+### Scope limits
+
+- Do not modify any skill file directly. Only append to `_pending.yaml`.
+- Do not invoke the Curator.
+- Do not commit.
+- Evidence snippets: ≤ 20 lines. Longer snippets are truncated with `... [truncated]`.
