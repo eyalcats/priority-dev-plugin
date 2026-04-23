@@ -1,2 +1,3 @@
 # Append-only log of rejected findings with reasons.
-# Format: <ISO8601>\t<candidate-id>\t<classification>\t<pattern_name>\t<reason>
+# Format: <ISO8601>	<candidate-id>	<classification>	<pattern_name>	<reason>
+2026-04-23T00:00:00Z	d4g6c8d0-de12-6f34-e5d6-7f8g9a01d204	missing	SYSPATH('LOAD') load-file directory token	already-documented: SYSPATH('LOAD') appears in plugin/skills/priority-sdk/sql-patterns.sql:601 and advanced-programming.md:742

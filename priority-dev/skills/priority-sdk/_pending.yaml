@@ -2,4 +2,36 @@
 # Appended by Scouts (Mode 1: /gap-scan) and the learning-extractor (Mode 2: SessionEnd loop).
 # Drained by the curator (gap-curator mode) on approval or rejection.
 # Schema defined in docs/superpowers/specs/2026-04-23-gap-scan-design.md.
-candidates: []
+candidates:
+  - id: b2e4f5a6-8c9d-4e0f-c1b2-3d4e5f670b02
+    added_at: 2026-04-23T00:00:00Z
+    source_mode: bootstrap
+    source_ref: LOADORDERS
+    classification: missing
+    pattern_name: UPLOAD built-in step with :$.FFL variable
+    pattern_signature: proc-step-upload-ffl
+    evidence:
+      metadata_table: PROG + PROGTEXT (EPROG.PROG POS=10 and POS=15)
+      snippet: |
+        /* POS=10 SQLI step sets up file path */
+        :FROMFILE = STRCAT(SYSPATH('LOAD'), 'orders.doc');
+        :$.FFL = :FROMFILE;
+        :TOFILE = STRCAT(SYSPATH('LOAD'), 'LOADORDERS');
+        /* POS=15 UPLOAD built-in step */
+        ENAME=UPLOAD, ETYPE=B
+        PROGPARAM: NAME=FFL, TYPE=CHAR
+    proposed_edit:
+      target: references/procedures.md §Built-in Steps
+      diff: |
+        ### UPLOAD step
+        `ENAME=UPLOAD, ETYPE=B` uploads a file from client to server.
+        The server destination path is passed via PROGPARAM `FFL` (CHAR).
+        The preceding SQLI step must set `:$.FFL` (procedure global scope):
+          :FROMFILE = STRCAT(SYSPATH('LOAD'), 'myfile.doc');
+          :$.FFL = :FROMFILE;
+        The `:$.` prefix addresses the procedure's global parameter namespace,
+        bridging a SQLI step variable into a built-in step's parameter.
+    notes: >
+      The :$.FFL scoping convention is completely undocumented. SYSPATH('LOAD')
+      is also missing from skill docs. Both are needed for any file-upload
+      procedure step and appear consistently in this and related entities.

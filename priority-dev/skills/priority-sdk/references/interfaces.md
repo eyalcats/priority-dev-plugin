@@ -951,6 +951,41 @@ A table load is characterized by:
 Record definitions in: **Characteristics for Download** form and sub-levels
 (`System Management > Database Interface > Table Load (Interfaces)`)
 
+### Load Table Architecture and RECORDTYPE Convention
+
+Custom load tables use a `RECORDTYPE CHAR(3)` column to tag each flat-file row with its semantic type. Standard column set:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `LINE` | INT | File line number (auto-assigned by load) |
+| `RECORDTYPE` | CHAR 3 | Record type tag — drives post-load dispatch |
+| `LOADED` | CHAR 1 | Boolean processed flag (`'Y'` when successfully transferred) |
+| `KLINE` | INT | Key used when linking text rows to parent records |
+
+Typical RECORDTYPE values (example from LOADORDERS):
+
+| Value | Meaning |
+|-------|---------|
+| `'1'` | Header record (one per document) |
+| `'2'` | Line item (multiple per header) |
+| `'3'` | Text / remark attached to a line item |
+| `'4'` | Text / remark attached to the header |
+
+Post-load SQLI steps iterate over the staging table and use RECORDTYPE to dispatch different processing logic per record type. Ternary dispatch example:
+
+```sql
+/* header='1' -> text type '4', line item='2' -> type '3' */
+SELECT (:REC = '1' ? '4' : '3') INTO :RECTEXT FROM DUMMY;
+INSERT INTO PROCTABLETEXT (KLINE, TEXT)
+  SELECT SQL.LINE, TEXT FROM LOADORDERS
+  WHERE RECORDTYPE = :RECTEXT AND LINE > :LINE
+  AND LINE < :NEXTLINE AND TEXT <> '';
+```
+
+RECORDTYPE dispatch is the architectural core of flat-file imports. The `LINE`/`RECORDTYPE`/`LOADED`/`KLINE` column set appears consistently in all custom load table definitions.
+
+*(seen in: LOADORDERS)*
+
 ### Defining the Load File
 
 Use ASCII or Unicode encoding for load files. Store them in `system\load` directory or sub-directories. Match the file name to the name defined in the Characteristics for Download form.

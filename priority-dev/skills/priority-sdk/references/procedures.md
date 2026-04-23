@@ -190,6 +190,22 @@ When modifying execution order, create an identical step with a different Step v
 | `L` | Table load file -- import external data |
 | `C` | Compiled program -- manipulate data |
 
+### Load Step (ETYPE = L)
+
+A step with type `L` invokes a Load-table entity defined in **Characteristics for Download** (DBLOAD). Priority reads the file staged by a preceding UPLOAD step, parses it per the load table layout, and populates the staging table. The standard parameter for an L step is `MSG` (ASCII type, position 10), which receives load messages.
+
+Example scaffold (LOADORDERS procedure, step POS=40):
+
+```
+Step entity name : LOADORDERS
+Step type        : L
+PROGPARAM        : NAME=MSG, TYPE=ASCII, POS=10
+```
+
+The entity name of the L step must match the load file name registered in **Characteristics for Download** -- typically identical to the staging table/form name. The L step is the counterpart to the `EXECUTE DBLOAD` form (see [Table Loads (DBLOAD)](#table-loads-dbload) in interfaces.md); using it as a procedure step is the standard approach for file-import wizards.
+
+*(seen in: LOADORDERS)*
+
 ### Basic Commands
 
 | Command | Description |
@@ -381,6 +397,27 @@ A single procedure can have up to **100 cursors** open simultaneously. Reuse the
 ### Check SQL Syntax
 
 Run the **Syntax Check** program by Action from the Procedure Generator form to check for syntax errors before activation.
+
+### Batch Text Insertion via ADDIPHONETEXT
+
+To bulk-insert rows into a text subform from a procedure step, use `PROCTABLETEXT` as a staging table and call `EXECUTE ADDIPHONETEXT`:
+
+```sql
+SELECT SQL.TMPFILE INTO :TXT FROM DUMMY;
+LINK PROCTABLETEXT TO :TXT;
+ERRMSG 1 WHERE :RETVAL <= 0;
+INSERT INTO PROCTABLETEXT (KLINE, TEXT)
+  SELECT SQL.LINE, <text_col> FROM <src_table> WHERE <condition>;
+GOTO <skip_label> WHERE :RETVAL <= 0;
+EXECUTE ADDIPHONETEXT :PARENTKEY, 0, '<TextFormName>', :TXT, 1, 0, 0;
+DELETE FROM PROCTABLETEXT;
+LABEL <skip_label>;
+UNLINK PROCTABLETEXT;
+```
+
+`ADDIPHONETEXT` arguments: parent key (INT), `0`, text-form name (e.g., `'LOADORDERSTEXT'`), tmp file handle, `1`, `0`, `0`. `KLINE` in `PROCTABLETEXT` must equal the parent record's `LINE` value. The `DELETE FROM PROCTABLETEXT` before `UNLINK` clears the temp file. Omitting the LINK/UNLINK wrapper causes the insert to operate on the real system table.
+
+*(seen in: LOADORDERS)*
 
 ---
 
