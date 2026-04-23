@@ -252,6 +252,65 @@ When re-filtering a form that was already filtered, use `clearFilter` first:
 }
 ```
 
+### Entity discovery (forms, procedures, reports, tables)
+
+When you know a Hebrew or English title fragment, partial ENAME, or just a few words from the title — do not guess and do not run repeated probes. Use one of these tested recipes (verified against `lp1378/demo` 2026-04-23).
+
+The canonical entity registry is the **`EXEC`** table — holds `ENAME`, `TITLE`, `TYPE` for all 12,868 entities (forms, procedures, reports, tables, subforms, system types). Filterable directly via SQLI.
+
+**By title fragment (forms only, WebSDK):**
+
+```json
+{
+  "form": "EFORM",
+  "operations": [
+    {"op": "filter", "field": "TITLE", "value": "%קבלות%", "operator": "LIKE"},
+    {"op": "getRows"}
+  ]
+}
+```
+
+**By non-contiguous words — AND together (SQLI on EXEC, the ONLY working path):**
+
+WebSDK `filter` ops **REPLACE** each other — only the LAST applies. Verified twice in opposite order: `[%קבלות%, %סחורה%]` returned 19 rows containing only "סחורה"; `[%סחורה%, %קבלות%]` returned 23 rows containing only "קבלות". There is no AND-chain primitive in WebSDK. Use SQLI:
+
+```sql
+SELECT ENAME, TITLE, TYPE FROM EXEC
+WHERE TITLE LIKE '%קבלות%' AND TITLE LIKE '%סחורה%'
+ORDER BY TYPE, ENAME FORMAT;
+```
+
+Returns 6 rows when both words are present in any order, any position.
+
+**By title fragment — all entity types (SQLI on EXEC):**
+
+Returns forms, procedures, reports, tables, subforms in one call.
+
+```sql
+SELECT ENAME, TITLE, TYPE FROM EXEC
+WHERE TITLE LIKE '%קבלות%' FORMAT;
+```
+
+`TYPE` values: `F` form, `P` procedure, `R` report, `S` subform, `T` table, plus system types A–M.
+
+**By partial ENAME:**
+
+```sql
+SELECT ENAME, TITLE, TYPE FROM EXEC
+WHERE ENAME LIKE '%DOC%' FORMAT;
+```
+
+SQLI `LIKE` on ENAME is case-sensitive — use uppercase. WebSDK `filter(ENAME, ..., LIKE)` is case-insensitive.
+
+**Caveats:**
+
+- `EFORM filter(DNAME, ..., LIKE)` returns "Invalid filter" — DNAME is not LIKE-able via the bridge. Use TITLE or query EXEC.
+- `EFORM filter(TYPE, ..., =)` returns "Invalid filter" — filter by entity type via SQLI on EXEC.
+- **WebSDK `filter` ops REPLACE each other** — only the LAST filter applies. There is no AND-chain primitive. For AND-of-LIKEs (non-contiguous words), use SQLI on EXEC.
+- TITLE column is RCHAR(32) — long titles are truncated; very long-titled entities may not match a fragment from the truncated tail.
+- For OR semantics across two patterns, use SQLI: `WHERE TITLE LIKE '%a%' OR TITLE LIKE '%b%'`.
+- `ENGLISH` / `ENGLISH1` / `TABCLMNS` / `SYSTBL` / `SYS.TABLES` are NOT legal table names in Priority — do not query them.
+
 ### Using `search` to look up field values
 
 The `search` op calls `choose()` on a field — returns the valid values the user can pick from:

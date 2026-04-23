@@ -287,6 +287,21 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
   4. For *copying* an entity, skip navigation entirely — use the `copyEntity` compound op, which drives `procStart` on COPYPROG/COPYREP/COPYFORM/COPYINTER directly and doesn't need the source to be visible on any generator form.
 - **See:** `websdk-cookbook.md` § "Operation Property Reference" and § "`filter` vs `search` on generator forms", `procedures.md` § "Copying existing entities".
 
+### Filtering EFORM by `DNAME` / `TYPE`, or chaining `filter` ops expecting AND
+- **Symptom 1:** `{"op":"filter","field":"DNAME","value":"%קבלות%","operator":"LIKE"}` on EFORM returns `Invalid filter`. Same for `TYPE`.
+- **Symptom 2:** Chaining two `filter` ops on EFORM (`filter TITLE %a%` + `filter TITLE %b%`) returns rows containing only `b` — the second filter REPLACED the first.
+- **Wrong:** Trying more operators on `DNAME`/`TYPE`, or trusting that sequential `filter` ops AND together. Verified twice in opposite order on 2026-04-23: order matters because the LAST filter wins, not because they compose.
+- **Right:**
+  1. For partial title or name lookup on **forms**, use `EFORM filter(TITLE, "%fragment%", LIKE)` or `filter(ENAME, "%FRAG%", LIKE)` — both work as a single filter.
+  2. For **non-contiguous words** (AND-of-LIKEs), or for **all entity types** in one call (forms + procs + reports + tables), use SQLI on `EXEC`:
+     ```sql
+     SELECT ENAME, TITLE, TYPE FROM EXEC
+     WHERE TITLE LIKE '%w1%' AND TITLE LIKE '%w2%'
+     ORDER BY TYPE, ENAME FORMAT;
+     ```
+  3. Do NOT query `ENGLISH`, `ENGLISH1`, `TABCLMNS`, `SYSTBL`, `SYS.TABLES` — none are legal table names in Priority. EXEC is the canonical entity registry.
+- **See:** `websdk-cookbook.md` § "Entity discovery (forms, procedures, reports, tables)".
+
 ### Guessing the generator-form ENAME (e.g., `EPROC`, `EREPGEN`)
 - **Symptom:** WebSDK `formStart` fails with `אין מסך בשם זה` (no such form).
 - **Wrong:** Guessing from the entity type — `EPROC` for procedures, `EREPGEN` for reports, `EINTERFACE` for interfaces. None of these exist.
