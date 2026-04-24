@@ -235,6 +235,39 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Use the bridge's `prepareForm` status + a post-compile `getRows` on the form itself. **But:** when `prepareForm` *fails* with a compile error, `FORMPREPERRS` content IS authoritative for that failure — it names the form, column, and trigger/EXPR step precisely (e.g. `AINVOICEITEMS/ASTR_QPRICEN/EXPR` pointing at a dangling `$ASTR_EXCHANGE3`). Read it once immediately after a failing compile.
 - **See:** `triggers.md` § "FORMPREPERRS accumulates stale errors", `forms.md` § "Sub-level EXPR column referencing a parent column".
 
+### Treating single-form compile as ground truth for "Prepare All Forms" errors
+- **Symptom:** User reports errors from Priority's "Prepare all forms" (e.g., `"SOF_INVDOCS/SUPNAME/EXPR", line 1: parse error at or near symbol ;`). You run `websdk compile SOF_INVDOCS` and see a completely different error (e.g., `DOCCODE/POST-FIELD :$.OLINE missing`). Agent then either (a) concludes the user's errors are "stale" and moves on, or (b) invents a fix for an error not in its own FORMPREPERRS.
+- **Root cause:** Batch prepare-all processes forms in dependency order and may attribute errors to the wrong form, read stale per-column compile artifacts on disk, or use different strictness than single-form compile. The single-compile result is authoritative for THE FORM itself; it is NOT authoritative for the full batch picture.
+- **Wrong:** Dismissing user-reported batch errors as stale without evidence. Inventing a fix for an error FORMPREPERRS doesn't confirm.
+- **Right:** When batch errors don't reproduce in single compile, (1) state the divergence explicitly to the user, (2) don't auto-fix, (3) ask them to re-run Prepare All after any edits so you're reading the same batch state they are, (4) investigate upstream dependencies (join chains, `#INCLUDE` donors, sub-level links) that might be where the batch actually tripped.
+- **See:** `compile-debugging.md` § "Single-form compile vs batch 'Prepare All Forms'".
+
+### Clearing `FCLMN.TRIGGERS='Y'` to "fix" a compile error
+- **Symptom:** Column has `TRIGGERS='Y'` but no matching row in `FORMCLTRIG`. Agent assumes this is the root cause of a parse error on the column and clears the flag.
+- **Root cause:** `FCLMN.TRIGGERS='Y'` without `FORMCLTRIG` is extremely common — ~31,000 rows in a typical tenant. The flag can linger after a trigger was removed without meaning the column is broken.
+- **Wrong:** Clearing `TRIGGERS=''` as a first-try fix for any compile error near the column.
+- **Right:** Identify the error class first (`compile-debugging.md` § "Error class → root cause → triage query"). Parse errors at `;` on `FORM/COL/EXPR` are caused by `EXPRESSION='Y' + empty FCLMNA.EXPR`, not by orphan `TRIGGERS='Y'`. Only clear `TRIGGERS` when the invoker explicitly wants to disable the trigger surface on the column.
+- **See:** `compile-debugging.md` § "Class 1. Parse error at `;` on `<FORM>/<COL>/EXPR`".
+
+### Copy-pasting a trigger across forms without auditing `:$.<column>` references
+- **Symptom:** A form has a form-level or column-level trigger whose body references columns that don't exist on the host form (e.g., `:$.ORD`, `:$.OLINE`, `:$.ZTST_ORDNAME`). Classic scratch/donor-form artifact. Error: `משתנה <VAR>.$: בהפעלה <FORM>/<TRIGGER> אינו קיים כעמודה במסך`.
+- **Root cause:** Trigger was written for a donor form, copy-pasted to the host. Also appears via `#INCLUDE DONORFORM/COL/TRIGGER` where the donor references its own columns.
+- **Wrong:** Trying to fix by adding the referenced column to the host form (masks a real design error) or inventing values for the missing variable.
+- **Right:** Audit every `:$.X` in the copied body against `FORMCLMNS WHERE FORM = <host-id>`. If the column isn't on the host, either (1) delete the trigger if it's scratch (it often travels in packs — expect 2-3 more on the same form), or (2) rewrite the body to reference host columns. `#INCLUDE` from a donor form requires the donor to be parametric, not column-specific.
+- **See:** `compile-debugging.md` § "Class 2. Variable `:$.COL` 'not a form column'", § "Class 5. Broken `#INCLUDE FORM/COL/STEP`".
+
+### Using WebSDK `deleteRow` to remove a trigger with text under it
+- **Symptom:** `EFORM → FTRIG setActiveRow → deleteRow` fails with `ערך קיים במסך 'הפעלות המסך - שאילתות SQL'` (record exists in 'Form Triggers — SQL Queries'). Agent then tries `startSubForm FSTEP` (not a real subform name) and gets `Can't find Sub Form`.
+- **Root cause:** The trigger has `FORMTRIGTEXT` rows under it. The step subform name is not `FSTEP`; it's typically the text subform reachable only by peel navigation, and the peel may not always succeed via WebSDK.
+- **Wrong:** Guessing subform names (`FSTEP`, `FTRIGTEXT`, `FORMTRIGSTEPS`). Giving up and telling the user to delete via the UI.
+- **Right:** Cascade via SQLI on form-metadata tables. These tables don't fire business triggers, so raw DELETE is safe (project rule: "Form interface > raw UPDATE/INSERT" still applies — get explicit approval first, and show row counts before the DELETE):
+  ```sql
+  DELETE FROM FORMTRIGTEXT WHERE FORM = <FID> AND TRIG = <TID>;
+  DELETE FROM FORMTRIG     WHERE FORM = <FID> AND TRIG = <TID>;
+  ```
+  For column triggers: substitute `FORMCLTRIGTEXT` / `FORMCLTRIG` and scope by `NAME` too. For full form deletion see `compile-debugging.md` § "Cascade-deleting a form".
+- **See:** `compile-debugging.md` § "Peel-or-cascade decision", `websdk-cookbook.md` § "Known bridge behaviors".
+
 ### Form returns N duplicate rows per logical record
 - **Symptom:** Parent form filter returns many copies of the same record (e.g., `IVNUM=T396` → 299 rows); base table has 1 row; a sibling form on the same base table returns 1 row correctly.
 - **Wrong:** Chase the base table, joins, or trigger logic first.

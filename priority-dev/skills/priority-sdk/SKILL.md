@@ -143,6 +143,7 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 | **`references/file-operations.md`** | COPYFILE/MOVEFILE/DELWINDOW/MAKEDIR/GETDATE/GETSIZE, FILELIST, FILTER (text replace + encoding + base64), CRPTUTIL encryption, PREXFILE (print attachments), Click2Sign, TABINI (client INI) |
 | **`references/advanced-sqli.md`** | Run procedure/report from SQLI (WINACTIV/ACTIVATE/ACTIVATF), Financial Documents hooks (PREENAME/CONTENAME), Open Form Record from Procedure, Dynamic SQL, Semaphores, Word Templates for Specific Records, Business Rules Generator |
 | **`references/debugging.md`** | Debug flags (-trc), optimization, logging, revisions, VSCode extension, HEAVYQUERY, **Claude Code MCP integration** |
+| **`references/compile-debugging.md`** | FORMPREPERRS triage: error-path decoding (`FORM/COL/EXPR`, `FORM/TRIGGER`), root-cause classes (orphan-expression, missing-column-ref, missing-message, no-visible-columns, broken-include), triage queries, chain-aware fix loop, cascade-delete recipes. Pair with the `compile-doctor` agent and `/compile-doctor` command. |
 | **`references/vscode-bridge-examples.md`** | VSCode bridge tool usage examples: get_current_file, write_to_editor, refresh_editor, run_windbi_command (38 commands), common workflows (read→edit→compile, inspect, scaffold, search, ad-hoc queries) |
 | **`references/websdk-cookbook.md`** | **WebSDK tested patterns**: operation property reference (including `filter` with `operator` for LIKE/>=/<= searches), `filter` vs `search` distinction, common mistakes, copy-paste recipes (read/hide/add columns, expressions, triggers, compile), SQLI metadata queries (FORMCLMNS, FORMTRIG, FORMCLTRIGTEXT), EFORM alias→real table mapping |
 | **`references/web-cloud-dashboards.md`** | Priority Web differences, Cloud (system/sync), Dashboards/Priority Lite, BPM creation, Web SDK (CORS, connection, reports, search, procedures, encoding, performance) |
@@ -196,6 +197,9 @@ Read `references/integrations.md` > XML/JSON Parsing sections, then see `example
 
 ### Debug a form or procedure
 Read `references/debugging.md` > Debug Tools section for the `-trc` flag syntax.
+
+### Triage a compile error (`prepareForm` fails, or "Prepare All Forms" lists errors)
+Read `references/compile-debugging.md`. It decodes the `FORM/COLUMN/STEP` error path, classifies the error by root cause, and gives a paste-ready triage query + fix recipe for each class. For automated triage, invoke `/compile-doctor ENTITY [ENTITY...]` — spawns `compile-doctor` subagents that diagnose and fix in a chain-aware loop.
 
 ### Create a table with DBI
 Read `references/tables-and-dbi.md` > DBI Syntax section, then see `examples/sql-patterns.sql`.
@@ -256,6 +260,7 @@ To find specific content in reference files, search for these patterns:
 | Dynamic SQL / Semaphores | `EXECUTE SQLI\|LASTS` | `references/advanced-sqli.md` |
 | Run proc/report from SQLI | `ACTIVATF\|WINACTIV\|ACTIVATE` | `references/advanced-sqli.md` |
 | Debug | `-trc\|DEBUGSQL\|HEAVYQUERY` | `references/debugging.md` |
+| Compile errors (FORMPREPERRS triage) | `parse error at or near symbol ;\|FORM/COL/EXPR\|orphan-expression\|missing-column-ref\|compile-doctor` | `references/compile-debugging.md` |
 | Dashboard | `WINHTMLH\|HTMLCURSOR` | `references/web-cloud-dashboards.md` |
 | Web SDK | `CORS\|Connection\|PAT\|reportOptions\|getRows\|displayURL` | `references/web-cloud-dashboards.md` |
 | HEBCONV | `HEBCONV\|CLR\|hebutils` | `references/sql-core.md` |
