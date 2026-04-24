@@ -211,6 +211,25 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 
 ## Debugging
 
+### Reaching for `run_windbi_command` dump/search commands for inspection
+- **Symptom:** Bridge log shows `SQLIController` errors like `Can't execute [Dump Form]. Cause: No form data` / `Dump Report. No report data` / `Expected an .pq file` / `No search string data`. Agent retries the same command varying `entityName`, or concludes the entity "doesn't exist". In one week of real usage these accounted for 188 errors: 36× `dumpForm`, 29× `dumpProcedure`, 22× `displayFormColumns`, 20× `findStringInAllForms`, 9× `runSqliFile`, 6× `executeDbi`, 6× `dumpReport` — against **zero** `run_inline_sqli` / `websdk_form_action` errors in the same window.
+- **Root cause:** WINDBI commands are VSCode command-palette invocations. They target the **active editor buffer**, not the `entityName` parameter — `entityName` is a hint the bridge uses to clipboard-paste into the input dialog, not a selector. Additionally, dump commands render output to a VSCode webview panel (HTML), which the bridge cannot read programmatically. `vscode-bridge-examples.md` § "Command Behavior Reference" documents 30–50% capture rate for the dump category.
+- **Wrong:** Default to `run_windbi_command("priority.dumpForm", entityName: "X")` / `dumpProcedure` / `dumpReport` / `displayFormColumns` / `displayTableColumns` / `findStringInAllForms` / `executeDbi` / `runSqliFile` to inspect or run things.
+- **Right:** Use capturable, editor-independent paths:
+
+  | Goal | Use | Don't use |
+  |------|-----|-----------|
+  | Run DBI | `run_inline_sqli(mode="dbi", sql=...)` — direct WCF, no file | `priority.executeDbi` |
+  | Run ad-hoc SQLI | `run_inline_sqli(sql=...)` | `priority.runSqliFile` |
+  | Inspect form columns | `websdk_form_action` on EFORM → FCLMN, or `SELECT … FROM FORMCLMNS WHERE FORM='X' FORMAT;` | `priority.displayFormColumns` / `priority.dumpForm` |
+  | Inspect procedure steps | `websdk_form_action` on EPROG subforms, or `SELECT … FROM CODEREF …` | `priority.dumpProcedure` |
+  | Inspect table schema | `SELECT … FROM COLUMNS WHERE TNAME='X' FORMAT;` | `priority.displayTableColumns` / `priority.dumpTable` |
+  | Search code | `SELECT … FROM CODEREF WHERE TEXT LIKE '%x%' FORMAT;` | `priority.findStringInAllForms` |
+  | Compile form/proc | `websdk_form_action` compound `compile` op | `priority.prepareForm` without entityName |
+
+- **When WINDBI is actually needed:** `priority.prepareForm` / `prepareProc` with an explicit `entityName` is a last-resort compile fallback when the WebSDK compile op fails. Report compile (Prepare/הכנה) has no WebSDK equivalent — WINDBI is the only path per `feedback_use_websdk_for_all_ui_tasks.md`.
+- **See:** `vscode-bridge-examples.md` § "Command Behavior Reference", `websdk-cookbook.md` § "SQLI metadata queries", § "Entity discovery", § "Operation Property Reference".
+
 ### Trusting FORMPREPERRS as authoritative compile status
 - **Wrong:** Entries accumulate across compile attempts; "Could not read ERRMSGS" reports the same whether current compile succeeded or failed.
 - **Right:** Use the bridge's `prepareForm` status + a post-compile `getRows` on the form itself. **But:** when `prepareForm` *fails* with a compile error, `FORMPREPERRS` content IS authoritative for that failure — it names the form, column, and trigger/EXPR step precisely (e.g. `AINVOICEITEMS/ASTR_QPRICEN/EXPR` pointing at a dangling `$ASTR_EXCHANGE3`). Read it once immediately after a failing compile.
@@ -226,9 +245,9 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **See:** `docs/solutions/database-issues/priority-form-row-duplication-astr-chain-2026-04-20.md`, `forms.md` § "Multiple Joins".
 
 ### Relying on `runSqliFile` / `executeDbi` with a specific `entityName`
-- **Wrong:** These run the currently active VSCode editor tab regardless; `entityName` is logging only. Stale content may run if VSCode hasn't reloaded.
-- **Right:** Use `run_inline_sqli` — direct WCF, no active-editor dependency.
-- **See:** `websdk-cookbook.md` § "Known bridge behaviors" → "`runSqliFile` / `executeDbi` active-editor".
+- **Wrong:** These run the currently active VSCode editor tab regardless; `entityName` is logging only. Stale content may run if VSCode hasn't reloaded. Fails outright with `Expected an .pq file` when the active editor isn't a .pq (bridge log shows this hitting 9×/6× per week).
+- **Right:** Use `run_inline_sqli` (`mode="sqli"` or `mode="dbi"`) — direct WCF, no active-editor dependency, zero logged failures.
+- **See:** `websdk-cookbook.md` § "Known bridge behaviors" → "`runSqliFile` / `executeDbi` active-editor". Part of the broader anti-pattern — see § "Reaching for `run_windbi_command` dump/search commands for inspection" above.
 
 ### `SELECT` via `run_inline_sqli` prints no rows ("Execution ok" with nothing)
 - **Symptom:** `run_inline_sqli({ sql: "SELECT ENAME FROM EXEC WHERE ENAME = 'FOO'" })` returns success with zero visible rows — then the next agent retries the query 5 different ways, guessing the entity must not exist.

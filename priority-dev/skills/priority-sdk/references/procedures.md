@@ -274,6 +274,15 @@ Determine order by the **position** column (an integer). Not required for single
 | `LINE` | Linked file -- single record from the database |
 | `HELP` | Help message displayed as part of the input window |
 
+#### Specialized PROGPARAM type details
+
+| TYPE   | Use                                                        |
+|--------|------------------------------------------------------------|
+| `HELP` | Non-interactive — prints help text at top of input dialog. Set WIDTH=0, POS=0, no EXPR. |
+| `ASCII`| Output-file path for batch/background runs. Use POS=0 to hide from interactive dialog. |
+
+*(seen in: TRIAL_BALANCE, OPENCUSTORDERS, INV_SALESPROFITPART)*
+
 ---
 
 ## User Input in Procedures
@@ -298,6 +307,24 @@ To use messages from a different procedure, designate its name in the **Entity N
 ### Choose Options from Radio Buttons (CHOOSE)
 
 The first parameter stores the result of the user's choice; its title appears as the heading.
+
+**CHOOSE step PROGPARAM shape (Method 1 — parameter list)**
+
+Inside a CHOOSE step, PROGPARAM rows follow this convention:
+- `POS=0` — the **target variable** that will hold the user's choice
+  (its TITLE becomes the dialog heading).
+- `POS=10`, `POS=20`, ... — the **option labels**, each with a
+  numeric `EXPR` value Priority assigns when that option is picked.
+  Set `HIDE=I` so they appear as radio buttons in the dialog.
+
+Example:
+```
+PROGPARAM NAME=COS TITLE='Report type' POS=0  HIDE=I   /* target :$.COS */
+PROGPARAM NAME=REA TITLE='Actual cost' POS=10 HIDE=I EXPR='2'
+PROGPARAM NAME=STD TITLE='Standard price' POS=20 HIDE=I EXPR='1'
+```
+
+*(seen in: INV_SALESPROFITPART, TRIAL_BALANCE, OPENCUSTORDERS)*
 
 **Method 1: Parameter list**
 - Define additional parameters with unique constant values (integers), titles, and positions
@@ -489,6 +516,16 @@ Typical procedure structure:
 - Input parameters passed from the procedure to the report query
 - No need to designate parameter position for a report step
 
+### PROGFORMATS is gated by EPROG.RS
+
+> **PROGFORMATS is gated by EPROG.RS.** Procedures with `RS='R'`
+> (those that wrap a report) reject `startSubForm(PROGFORMATS)`
+> with the message *"To define additional print formats, use the
+> document design facility."* Print-format definitions for reports
+> live in the document designer, not here.
+
+*(seen in: TRIAL_BALANCE, OPENCUSTORDERS)*
+
 <!-- ADDED START -->
 ### Common Issues and Solutions
 
@@ -501,6 +538,38 @@ Typical procedure structure:
 - **Data Duplication in Print Formats:**
   If a report step produces duplicated data after an upgrade or modification, it is often due to a data filtering issue within the report query or the linked parameters. Ensure that the input parameters passed to the report step correctly filter the underlying table to a single record or the intended dataset.
 <!-- ADDED END -->
+### Web client zoom callbacks: `:HTMLACTION` and `:HTMLVALUE`
+
+When a user clicks a zoom link on a report cell in the web client,
+Priority re-runs the procedure with two implicit variables set:
+
+- `:HTMLACTION` — non-empty when the procedure was triggered by zoom
+  (vs. a normal menu launch). Use it to gate alternate flow:
+      `GOTO 1 WHERE :HTMLACTION <> '';`
+- `:HTMLVALUE` — comma-separated string of context values. Decode
+  with `STRPIECE(:HTMLVALUE,',',N,1)` and `ATOI(...)` for ints.
+
+The packed value is built in a hidden report column with `FORDER=9`
+and an EXPR like:
+    `STRCAT(ITOA(0+:DAT),',',ITOA(0+:GL),',',...)`
+
+The `0+:VAR` idiom forces integer arithmetic before `ITOA`.
+
+Example gate pattern at the start of the procedure's first SQLI step:
+```sql
+:$.NTL = 0;
+GOTO 1 WHERE :HTMLACTION <> '';    /* skip INPUT when zoomed */
+/* ...normal INPUT block... */
+GOTO 2;
+LABEL 1;
+:$.GO = 70;                        /* alternate flow for zoom callback */
+:$.DAT = ATOI(STRPIECE(:HTMLVALUE,',',1,1));
+:$.GL  = ATOI(STRPIECE(:HTMLVALUE,',',2,1));
+LABEL 2;
+```
+
+*(seen in: TRIAL_BALANCE)*
+
 ### Change the Report Title at Runtime
 
 In the SQLI step preceding the report, use:

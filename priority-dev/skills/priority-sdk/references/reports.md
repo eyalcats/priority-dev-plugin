@@ -158,6 +158,69 @@ Use an outer join to allow for unmatched rows between joined tables. Add a **que
 
 Outer-joined tables are accessed after regular join tables.
 
+### Multi-table reports (TABLE=0)
+
+When `EREP.TABLE='0'`, the report has no base table — every joined
+table is wired up by adding a hidden `OUTPUT=Y` column whose
+`CNAME1`/`TNAME1` declare the foreign-key target.
+
+| Field   | Meaning                                       |
+|---------|-----------------------------------------------|
+| CNAME   | FK source column on the source table          |
+| TNAME   | source table                                  |
+| CNAME1  | PK target column on the joined table          |
+| TNAME1  | joined table                                  |
+| OUTPUT  | `Y` (hidden — system uses it only for joining) |
+| DISPLAYMODE | `0` (not displayed)                       |
+
+The source and target column names may differ (e.g. `ORDERS.DOER →
+USERS.USER`). The report engine builds the join graph from these
+OUTPUT rows; you do not write SQL JOINs anywhere.
+
+Without an OUTPUT row for each table, joined-table columns (e.g.
+`COUNTRIES.COUNTRYNAME`) silently produce no data.
+
+*(seen in: CUSTOMERS, OPENCUSTORDERS, INV_SALESPROFITPART, TRIAL_BALANCE)*
+
+### IDCOLUMNE / IDJOINE / IDJOIN suffix flags
+
+These three fields are normally a single integer (0, 1, 2 ...) telling
+the report engine which logical join to use when the same table is
+referenced more than once. Two single-character suffixes change
+behavior:
+
+| Suffix | Meaning                                                  |
+|--------|----------------------------------------------------------|
+| `?`    | Make this join optional (LEFT OUTER JOIN). Without it, rows missing the FK target disappear from the report. |
+| `!`    | Mark this column as the report's primary lookup key — the column the user filters on in the input dialog. Pair with `INPUT=Y`. |
+
+Examples:
+- 1:1 extension table (`CUSTOMERS → CUSTOMERSA`): set `IDCOLUMNE='0?'`
+  on the CUSTOMERSA columns so customers without an extension row
+  still appear.
+- Trial-balance code lookup: `IDCOLUMNE='0!'` plus `INPUT=Y` on the
+  column users filter by.
+
+*(seen in: CUSTOMERS, TRIAL_BALANCE, OPENCUSTORDERS)*
+
+### POSITION vs POS — two distinct ordering fields
+
+REPCLMNS has two separate fields that look like ordering:
+
+- **POSITION** — the row's sequence in the REPCLMNS subform list.
+  Controls only the order rows appear when editing the report.
+- **POS** — the column's position in the printed output. Controls
+  actual layout.
+
+These can diverge freely. A common pattern: every hidden `OUTPUT=Y`
+column is filed under `POSITION=99` (so they cluster at the bottom
+of the editor), while each gets its own unique `POS` for layout.
+
+When adding a column via WebSDK, set both fields explicitly — don't
+assume one defaults from the other.
+
+*(seen in: TRIAL_BALANCE, OPENCUSTORDERS)*
+
 ### Hide Columns
 
 Flag the **Hide** column to prevent a column from displaying during output.
@@ -319,9 +382,59 @@ Combine column and group functions as needed.
 - Add a hidden column with the title **`#ACCTOTAL`** to include sub-totals up to a specific point
 - Add a hidden column entitled **`#TOTALSIGN`** to multiply report lines by its value when calculating totals (useful for displaying positive values while treating them as negative in totals)
 
+### FFUNC and FSUBTOTAL column-level aggregation
+
+`FFUNC` and `FSUBTOTAL` work together on numeric REPCLMNS columns to
+declare per-column aggregation and break behavior:
+
+#### FFUNC values
+
+| FFUNC | Aggregate                            |
+|-------|--------------------------------------|
+| `S`   | Sum (most common — financial totals) |
+| `A`   | Average                              |
+| `C`   | Count                                |
+| `M`   | Max                                  |
+| `N`   | Min                                  |
+
+#### FSUBTOTAL values
+
+Pair `FSUBTOTAL` on a numeric column with `FSUBTOTAL='R'` on the
+grouping column that should trigger the break.
+
+| FSUBTOTAL | Meaning                                                |
+|-----------|--------------------------------------------------------|
+| `R`       | **R**eset / break — re-start aggregation when this column's value changes (put on the grouping column). |
+| `B`       | Show subtotal at every **B**reak (put on the numeric column). |
+| `T`       | Show grand **T**otal only (no per-break subtotals).    |
+| `S`       | Show as **S**ubtotal at every break (alternate label). |
+
+Common pairings: `FFUNC='S'` + `FSUBTOTAL='B'` = running subtotals at
+every break; `FFUNC='S'` + `FSUBTOTAL='T'` = grand total only.
+
+*(seen in: TRIAL_BALANCE, INV_SALESPROFITPART, OPENCUSTORDERS)*
+
 ---
 
 ## Refine Report Data Display
+
+### DISPLAYMODE values
+
+The `DISPLAYMODE` field on REPCLMNS controls how the column renders:
+
+| Value | Effect                                                           |
+|-------|------------------------------------------------------------------|
+| 0     | Hidden (system/OUTPUT/key columns — never printed).              |
+| 1     | Normal display.                                                  |
+| 2     | Line break after this column — used to wrap long fields onto a new row. |
+| 3     | Emphasized / bold.                                               |
+| 6     | Decimal-precision display (typically for exchange rates).        |
+| 9     | High-precision numeric (more decimals than 6).                   |
+
+Use `2` to break addresses across multiple lines. Use `3` to emphasize
+the row's primary identifier (customer name, order number, etc.).
+
+*(seen in: CUSTOMERS, OPENCUSTORDERS, INV_SALESPROFITPART)*
 
 ### Spacing Between Rows
 
@@ -505,6 +618,53 @@ Example (Avg Monthly Consumption):
 ```
 
 ---
+
+### EXPRESSION=Y has two distinct meanings
+
+Whether a column with `EXPRESSION=Y` (i.e. an entry in REPCLMNSA) is a
+**filter** or a **computed value** depends on whether `CNAME` is set on
+that REPCLMNS row:
+
+**CNAME present → filter expression.** The REPCLMNSA text is a SQL
+predicate fragment beginning with an operator. The column value is the
+implicit left-hand side. Examples:
+- `BETWEEN :FDT AND :TDT`
+- `= '\0'` (closed flag must be empty)
+- `> 0 AND ORDERITEMS.TQUANT > 0`
+- `<> 'Y'`
+
+**CNAME empty → computed expression.** The REPCLMNSA text is the full
+formula that produces the displayed value. Multi-line expressions are
+stored as multiple REPCLMNSA rows that concatenate. Set `EXPRTYPE` to
+`REAL`, `INT`, `CHAR`, or `RCHAR` to declare the result type.
+
+A common mistake: setting `EXPRESSION=Y` with CNAME populated and a
+full formula — Priority interprets the formula as a filter predicate
+and silently drops rows.
+
+*(seen in: CUSTOMERS, OPENCUSTORDERS, INV_SALESPROFITPART, TRIAL_BALANCE)*
+
+### Reference other columns and shared expressions
+
+Inside a REPCLMNSA expression you can reference values from other
+columns or from the report's shared expression library:
+
+| Syntax            | Meaning                                              |
+|-------------------|------------------------------------------------------|
+| `#NN`             | Value of the sibling report column at POS=NN         |
+| `#TABLE.NN`       | Value of the column at POS=NN from the joined table TABLE |
+| `#EXPR.NN`        | Value of shared expression #NN from the report's expression library |
+
+Example — a profit column that subtracts a cost column from a revenue
+column and multiplies by a per-row commission factor stored in a
+joined table:
+
+    #35 * #AGENTINVOICES.130 - #40
+
+Multi-line expressions store one segment per REPCLMNSA row (ordered by
+ROW); concatenation happens at compile time.
+
+*(seen in: OPENCUSTORDERS, INV_SALESPROFITPART)*
 
 <!-- ADDED START -->
 ### Common Issues and Solutions

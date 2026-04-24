@@ -142,7 +142,7 @@ The capture rate varies by command category (see table above). Dump commands hav
 
 ### Tool Selection Guide
 
-**Use WebSDK (`websdk_form_action`) for all form operations.** It supports filter, subform navigation, direct activations, and all CRUD. Use `write_to_editor` for code. Use `run_windbi_command` for DBI and table inspection only.
+**Use WebSDK (`websdk_form_action`) for all form operations.** It supports filter, subform navigation, direct activations, and all CRUD. Use `write_to_editor` for code. Use `run_inline_sqli` for DBI, SQLI, and table/form/proc inspection via SQLI on system tables (FORMCLMNS, CODEREF, COLUMNS, EXEC, etc.) — zero logged failures over a week of real usage. Reserve `run_windbi_command` for genuinely UI-bound operations: `prepareForm`/`prepareProc` as a compile fallback with explicit `entityName`, and report compile (no WebSDK equivalent). See `common-mistakes.md` § "Reaching for `run_windbi_command` dump/search commands for inspection" for the full anti-pattern breakdown.
 
 #### Form Metadata — Use WebSDK on EFORM
 
