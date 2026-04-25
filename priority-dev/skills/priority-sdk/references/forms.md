@@ -886,6 +886,45 @@ filter EFORM (ENAME, "FORMNAME")
 
 Custom columns on system forms require `IDCOLUMNE > 5` (project rule; `IDCOLUMNE = 0` is reserved for system columns).
 
+#### `fieldUpdate` ordering matters for expression columns
+
+When creating an EXPRESSION column, set `EXPRESSION='Y'` **before** `WIDTH`. Priority validates WIDTH at `fieldUpdate` time and rejects it on non-expression/non-visible-imported rows:
+
+```
+Error: ניתן לקבוע/לשנות רוחב רק לעמודה חישובית או לעמודה מיובאת מוצגת בלבד
+       (Width can only be set/changed for a calculated column or a visible imported column)
+```
+
+Correct order: `NAME → EXPRESSION=Y → TYPE → WIDTH → (other fields) → saveRow`.
+
+#### Fallback: direct DBI INSERT when WebSDK `newRow` rejects the column name
+
+WebSDK's FCLMN `newRow`+`saveRow` validates `NAME` against the base-table columns + all joined-table columns for the form. For a truly new scratch/expression column whose NAME exists in neither (e.g., a column imported from a donor form via `#INCLUDE` that the host never had), `saveRow` fails with `ערך לא קיים בקובץ` ("value does not exist in file") regardless of how you set `CNAME`/`TNAME`/`EXPRESSION`.
+
+When WebSDK rejects a new NAME, a direct `INSERT INTO FORMCLMNS` succeeds — the underlying table accepts the row and compile treats it as a valid column:
+
+```sql
+INSERT INTO FORMCLMNS (FORM, NAME, COLUMN, JOIN, IDCOLUMN, IDJOIN, POS, WIDTH, HIDE, EXPRESSION, TRIGGERS, TITLE)
+VALUES (<FORM_ID>, '<NEW_NAME>', 0, 0, 0, 0, <POS>, <WIDTH>, 'Y', 'Y', '', '<Hebrew or ASCII title>');
+
+INSERT INTO FORMCLMNSA (FORM, NAME, EXPR, TYPE, DO)
+VALUES (<FORM_ID>, '<NEW_NAME>', '<scalar expression or 0>', '<INT|CHAR|RCHAR|DATE|REAL>', 0);
+
+COMMIT;
+```
+
+Compile after — the column behaves as a regular hidden expression column.
+
+**When this is the right move:**
+- `#INCLUDE` brought in code referencing a scratch variable that should live on the host form as a reset target (e.g., DLVTRACKITEMS' OLINE reset on a form that doesn't have OLINE).
+- You're porting a column shape from a donor form and the WebSDK validation chain is blocking the port.
+
+**When it's NOT:** any column that should be backed by a real base-table column or join. Use the canonical WebSDK flow for those — the validation is catching a real setup error.
+
+This is a permitted bypass of the "form interface > raw UPDATE/INSERT" rule specifically for metadata tables that don't fire business triggers. Still requires explicit user approval and should be followed by a compile to verify.
+
+*(Observed 2026-04-24: SOF_INVDOCS needed a scratch `OLINE` column because a `#INCLUDE DLVTRACKITEMS/DOCCODE/POST-FIELD` referenced `:$.OLINE`. WebSDK newRow failed on every field-combination attempt; direct INSERT into FORMCLMNS + FORMCLMNSA + compile worked first try.)*
+
 ### Deleting a column
 
 ```
@@ -990,6 +1029,29 @@ Common mistakes:
 Use this shape for any "display a column from a joined table" expression-column setup. The alternative — a real join through `JTNAME`/`JCNAME` on the base-column row plus an imported column — is still preferred when the picker UI is wanted (see "Foreign-Key Pickers: the join IS the picker"). The FCLMNA.EXPR shape is for columns that are expression-only (`EXPRESSION=Y`, no base-table storage).
 
 *(seen in: LOGPART + ~40 more forms via `FORMCLMNSA.EXPR LIKE '% WHERE % =%' AND EXPR NOT LIKE '%SELECT%' AND EXPR NOT LIKE '%FROM%'`)*
+
+⚠ **Verify before relying on this pattern** — on at least one tenant (`lp1378/demo`, 2026-04-24) the two-token `<TABLE> WHERE <key> = :$.<col>` shape **failed to compile** even when the RHS form variable was a valid form column. Observed errors: `parse error at or near symbol WHERE` (compiler doesn't recognize the shape) and `parse error at or near symbol ;` (when the body was being evaluated with an empty expansion). Inventory query on that tenant showed the pattern in use on the `F` template form only, and `F` itself didn't cleanly compile.
+
+Diagnostic before using the pattern on a new tenant:
+```sql
+/* Is there any OTHER production form (not 'F') successfully using this shape? */
+SELECT E.ENAME, A.NAME, A.EXPR
+FROM   FORMCLMNSA A, FORMCLMNS FC, EXEC E
+WHERE  A.FORM = FC.FORM AND A.NAME = FC.NAME
+AND    A.FORM = E.EXEC AND E.TYPE = 'F'
+AND    A.EXPR LIKE '% WHERE % = :$.%'
+AND    A.EXPR NOT LIKE '%SELECT%'
+AND    FC.EXPRESSION = 'Y'
+AND    E.ENAME <> 'F'
+FORMAT;
+
+/* Cross-check: are those forms clean in PREPERRMSGS? */
+SELECT FORMNAME, COUNT(*) FROM PREPERRMSGS GROUP BY FORMNAME FORMAT;
+```
+
+If the first query returns rows on forms that appear clean in the second query, the pattern works on the tenant. Otherwise, fall back to:
+- a real table join (`JTNAME`/`JCNAME` on the base column + imported display column), or
+- a direct `<TABLE>.<COLUMN>` scalar expression — only when the foreign table is already joined into the form's query plan via another imported column.
 
 ### Shared trigger libraries via `#INCLUDE func/<Name>`
 

@@ -49,6 +49,25 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Use ternary (`cond ? a : b`) with implicit concat inside branches, or `STRCAT` in a trigger.
 - **See:** `forms.md` § "Managing forms and columns via WebSDK".
 
+### FCLMN `saveRow` fails with "ערך לא קיים בקובץ" when creating a truly new column NAME
+- **Symptom:** WebSDK flow `startSubForm(FCLMN) → newRow → fieldUpdate(NAME, '<NEW_NAME>') → ... → saveRow` fails with `ערך לא קיים בקובץ` ("value does not exist in file"). Happens specifically when `<NEW_NAME>` is not present in the form's base table AND not in any joined table — a truly-new scratch/expression column (e.g., a reset target referenced by an `#INCLUDE` trigger from a donor form).
+- **Root cause:** WebSDK's FCLMN validator checks NAME against the form's scope (base-table columns ∪ joined-table columns ∪ existing form columns). A name that exists nowhere fails validation regardless of how you set `CNAME`/`TNAME`/`EXPRESSION`.
+- **Wrong:** Trying variations of `CNAME=DUMMY`, `TNAME=DUMMY`, `IDCOLUMNE=6`, etc. — the validator won't accept the NAME.
+- **Right:** Fall back to direct DBI INSERT into `FORMCLMNS` (and `FORMCLMNSA` for the expression body). This is the permitted bypass for metadata tables that don't fire business triggers. See `forms.md` § "Fallback: direct DBI INSERT when WebSDK `newRow` rejects the column name" for the recipe.
+
+### Setting FCLMN `WIDTH` before `EXPRESSION=Y` in a newRow chain
+- **Symptom:** `fieldUpdate` on WIDTH returns `ניתן לקבוע/לשנות רוחב רק לעמודה חישובית או לעמודה מיובאת מוצגת בלבד` ("Width can only be set/changed for a calculated column or a visible imported column").
+- **Root cause:** Priority validates WIDTH at fieldUpdate time against the row's current state. A fresh `newRow` has `EXPRESSION=''` and no physical column link — WIDTH is rejected.
+- **Right:** Set `EXPRESSION='Y'` first, then `WIDTH`. Correct order: `NAME → EXPRESSION → TYPE → WIDTH → (other fields) → saveRow`.
+- **See:** `forms.md` § "Adding a column" → "`fieldUpdate` ordering matters for expression columns".
+
+### Setting `IDJOINE` to a multi-digit value via `fieldUpdate`
+- **Symptom:** `fieldUpdate(IDJOINE, "10")` returns `סמן מספר מ-0 עד 9 ובנוסף אפשרי ? או !`.
+- **Root cause:** `IDJOINE` (EFORM-layer alias) is `CHAR(1)`, accepting `0`–`9`, `?`, or `!` only. The underlying `FORMCLMNS.IDJOIN` is `INT(2)`, but the EFORM UI/WebSDK layer encodes join IDs as single characters.
+- **Wrong:** Reading raw `FORMCLMNS.IDJOIN` values like `10` and copying them to `fieldUpdate(IDJOINE, ...)`.
+- **Right:** Treat raw FORMCLMNS.IDJOIN integers as opaque. Set `IDJOINE` via EFORM WebSDK only with 1-char values. If you need a 2-digit raw value, inspect the live form's row in WebSDK to see what `IDJOINE` renders as (e.g., `"0?"`, `"6"`) and copy that string.
+- **See:** `websdk-cookbook.md` § "Join metadata placement".
+
 ### Populating a stored base-table `ZOOM1` column via PRE-INSERT hardcodes
 - **Wrong:** `:$.ZOOM1 = 22` in PRE-INSERT only runs on insert, drifts if TYPE is edited, and hardcodes EXEC ids that can differ per tenant.
 - **Right:** Leave the base-table `ZOOM1` column unread. Use a ternary `FCLMNA.EXPR` on the hidden form `ZOOM1` column that dereferences PRE-FORM-initialized form variables (`0 + :ORDEXEC`, etc.). Initialize the variables via `SELECT EXEC INTO :VAR FROM EXEC WHERE ENAME = '<form>' AND TYPE = 'F'` in the PRE-FORM trigger.
@@ -230,10 +249,17 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **When WINDBI is actually needed:** `priority.prepareForm` / `prepareProc` with an explicit `entityName` is a last-resort compile fallback when the WebSDK compile op fails. Report compile (Prepare/הכנה) has no WebSDK equivalent — WINDBI is the only path per `feedback_use_websdk_for_all_ui_tasks.md`.
 - **See:** `vscode-bridge-examples.md` § "Command Behavior Reference", `websdk-cookbook.md` § "SQLI metadata queries", § "Entity discovery", § "Operation Property Reference".
 
-### Trusting FORMPREPERRS as authoritative compile status
-- **Wrong:** Entries accumulate across compile attempts; "Could not read ERRMSGS" reports the same whether current compile succeeded or failed.
-- **Right:** Use the bridge's `prepareForm` status + a post-compile `getRows` on the form itself. **But:** when `prepareForm` *fails* with a compile error, `FORMPREPERRS` content IS authoritative for that failure — it names the form, column, and trigger/EXPR step precisely (e.g. `AINVOICEITEMS/ASTR_QPRICEN/EXPR` pointing at a dangling `$ASTR_EXCHANGE3`). Read it once immediately after a failing compile.
-- **See:** `triggers.md` § "FORMPREPERRS accumulates stale errors", `forms.md` § "Sub-level EXPR column referencing a parent column".
+### Trusting FORMPREPERRS or `compile` op status as authoritative compile state
+- **Wrong:** Treating `websdk compile` returning "התכנית הסתיימה בהצלחה" as a cleanliness signal. The op's success message means the compile driver exited cleanly — not that the produced form artifact is usable. FORMPREPERRS `getRows` is also not authoritative — it filters/session-scopes and can return `{}` while real errors exist.
+- **Right:** Query `PREPERRMSGS` directly via SQLI for current compile state, AND `getRows` on the form to confirm it opens:
+  ```sql
+  SELECT FORMNAME, COLNAME, TRIGNAME, MESSAGE, LINE FROM PREPERRMSGS
+  WHERE FORMNAME = '<X>' OR MAINFORM = '<X>' FORMAT;
+  ```
+  Zero rows + form opens = clean. Anything else = keep debugging, regardless of op status.
+- **Observed:** 2026-04-24 on SOF_INVDOCS — compile op returned success 3× in a row while PREPERRMSGS had 2 persistent SUPNAME/CUSTNAME parse errors and the form returned `המסך לא מוכן` on every open. An automated loop trusting only the compile op would have declared victory and moved on.
+- **When FORMPREPERRS content IS useful:** immediately after a `prepareForm` that returned a hard error — it names the form/column/trigger/EXPR step precisely (e.g. `AINVOICEITEMS/ASTR_QPRICEN/EXPR` pointing at a dangling `$ASTR_EXCHANGE3`). Still cross-check against PREPERRMSGS before acting.
+- **See:** `compile-debugging.md` § "Reading compile state — three signals, only one is authoritative", `websdk-cookbook.md` § "Compile-status signals: PREPERRMSGS is authoritative".
 
 ### Treating single-form compile as ground truth for "Prepare All Forms" errors
 - **Symptom:** User reports errors from Priority's "Prepare all forms" (e.g., `"SOF_INVDOCS/SUPNAME/EXPR", line 1: parse error at or near symbol ;`). You run `websdk compile SOF_INVDOCS` and see a completely different error (e.g., `DOCCODE/POST-FIELD :$.OLINE missing`). Agent then either (a) concludes the user's errors are "stale" and moves on, or (b) invents a fix for an error not in its own FORMPREPERRS.

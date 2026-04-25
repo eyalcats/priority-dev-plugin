@@ -135,9 +135,9 @@ For rewrites, use DBI `DELETE + INSERT` via `run_inline_sqli(mode="dbi")`. See t
 
 `FCLMNA.EXPR` does not accept scalar subqueries. `(SELECT … WHERE …)` fails with `parse error at or near symbol SELECT`. Use a real join (imported column from joined table) or a POST-UPDATE trigger that assigns the computed value.
 
-### FORMPREPERRS accumulates stale errors
+### FORMPREPERRS — overwrites per compile, but state persists across sessions
 
-FORMPREPERRS exists and can be read via WebSDK, but entries accumulate across compile attempts. "Could not read ERRMSGS" reports the same way whether the current compile succeeded or failed. Authoritative signal is the bridge's `prepareForm` status + a `getRows` on the form itself, not FORMPREPERRS content. See the detailed pitfall at `FORMPREPERRS accumulates stale errors across compile attempts` below.
+FORMPREPERRS exists and can be read via WebSDK. Each compile **overwrites/refills** it with that compile's errors (it auto-shows errors from the last compile — see line ~710 below) — it does NOT additively accumulate within one session. However, entries **persist across sessions** until something rewrites them, so a `getRows` from a fresh session can return stale entries from a prior compile attempt that referenced different line numbers or variable names. Either way: "Could not read ERRMSGS" reports the same way whether the current compile succeeded or failed. Authoritative signal is the bridge's `prepareForm` status + a `getRows` on the form itself, not FORMPREPERRS content. See the detailed pitfall section below.
 
 ---
 
@@ -152,8 +152,8 @@ FORMPREPERRS exists and can be read via WebSDK, but entries accumulate across co
 | `getRows` on EFORM's FCLMN subform | Returns `{}` — EFORM metadata subforms don't return data via getRows | **Use SQLI on FORMCLMNS instead** (see SQLI Metadata Queries below) |
 | `filter(ENAME)` on FORMPREPERRS | "Invalid filter" | FORMPREPERRS has no ENAME column — just use `getRows` with no filter (shows last compile's errors) |
 | Querying table `FORMCOLUMNS` or `FORMCOL` | "not a legal table name" | The real table is `FORMCLMNS` |
-| Using `HIDEBOOL` in SQLI queries | "Unresolved identifier" | Real column is `HIDE` (HIDEBOOL is the EFORM view alias) |
-| Using `IDCOLUMNE` in SQLI queries | "Unresolved identifier" | Real column is `IDCOLUMN` |
+| Using `HIDEBOOL` in raw SQLI on `FORMCLMNS` | "Unresolved identifier" | Context-dependent: in raw SQLI use the physical column `HIDE`; in WebSDK `fieldUpdate` use the EFORM-view alias `HIDEBOOL`. Both are correct in their own surface — see "EFORM alias → real table/column mapping" |
+| Using `IDCOLUMNE` in raw SQLI on `FORMCLMNS` | "Unresolved identifier" | Context-dependent: physical `IDCOLUMN` for SQLI, EFORM alias `IDCOLUMNE` for WebSDK `fieldUpdate`. Same pattern: alias for the form layer, real name for the table layer |
 | `getRows` without `fromRow` on root form | Returns 0 rows | Always `filter` before `getRows` on root forms. `getRows(1)` is default after fix. |
 | `filter` without later `setActiveRow(1)` | Subform operations fail | Always `setActiveRow(1)` after `filter` before navigating |
 | `fieldUpdate(IDJOINE, "10")` or higher | `סמן מספר מ-0 עד 9 ובנוסף אפשרי ? או !` | IDJOINE accepts ONLY 0–9 (plus `?` and `!`). Old memory claim of "0–99" was wrong. Re-use numbers across different JTNAMEs if needed — IDJOINE only disambiguates when the same target table appears multiple times |
@@ -562,16 +562,20 @@ run_windbi_command  priority.prepareForm  SOF_PARENT
 
 **Key fact:** FLINK rows carry only `FNAME / TITLE / APOS / MODULENAME`. No parent-key / child-key columns are exposed. Priority still binds the two forms correctly — the mechanism lives in FLINK internals, not in anything we set.
 
-### ⚠ Pitfall: `FCLMNA.EXPR = ':$$.PARENTPK'` breaks the parent's compile (verified 2026-04-18)
+### ⚠ Pitfall: `:$$.PARENTPK` written as a literal token in `FCLMNA.EXPR` (verified 2026-04-18, reframed 2026-04-25)
 
-An earlier version of this cookbook (and the old `reference_subform_creation_via_websdk.md` memory) prescribed putting `EXPRESSION=Y` on the subform's link column and a FCLMNA row with `EXPR=':$$.PARENTPK'`. **This is wrong.** When the PARENT form compiles, Priority flattens `:$$.PARENTPK` to `:$.PARENTPK` while resolving cross-form activations (the `<PARENT>/DELETE` activation) and then tries to resolve `PARENTPK` as a real column on the parent — which doesn't exist. Result:
+**The bug is taking a placeholder literally — not the `:$$` prefix.** `:$$.<col>` is the correct, required way to reference a parent-form column from a subform expression. Real-world examples in the live system: `:$$.SUP`, `:$$.KLINE`, `:$$.SERIAL`, `:$$.FNCTRANS`, `:$$.CURRENCY`, `:$$.CUST`, `:$$.DOC` (see `examples/trigger-examples.sql` lines 44, 88, 112, 183, 446–452, 483).
+
+What broke: an earlier cookbook recipe wrote `:$$.PARENTPK` as if `PARENTPK` were a real column name, when it was meant as a *placeholder* for "your parent's actual primary-key column." Priority then flattens `:$$.PARENTPK` to `:$.PARENTPK` while resolving cross-form activations (the `<PARENT>/DELETE` activation) and tries to resolve `PARENTPK` as a real column on the parent — which doesn't exist:
 
 ```
 :$.PARENTPK אינו קיים כעמודה במסך בהפעלה <PARENT>/DELETE
 (":$.PARENTPK does not exist as a column in the form, during <PARENT>/DELETE activation")
 ```
 
-The parent's compile fails, which in turn cascades because `ERRMSGS` can't be read by the bridge (see next section). If you already added the orphan FCLMNA row, delete it via raw SQLI before recompiling:
+**Right way:** substitute the parent's actual key column name. If the parent's primary key is `KLINE`, use `:$$.KLINE`. If it's `ORDNAME`, use `:$$.ORDNAME`. The `:$$.` prefix stays.
+
+If you already added the orphan FCLMNA row from the broken recipe, delete it via raw SQLI before recompiling:
 
 ```sql
 DELETE FROM FORMCLMNSA WHERE NAME = 'PARENTKEY' AND EXPR = ':$$.PARENTPK';
@@ -599,16 +603,30 @@ This is ambiguous — it could be:
 - Form opens → compile actually succeeded; ignore the "failure" message.
 - Form returns `המסך לא מוכן` → compile really failed; need to see the text another way.
 
-### ⚠ FORMPREPERRS accumulates stale errors across compile attempts
+### ⚠ Compile-status signals: PREPERRMSGS is authoritative, `compile` op status can lie
 
-If you try to read errors directly via `websdk_form_action FORMPREPERRS getRows`, be aware that entries can be LEFT OVER from a previous compile — it is NOT freshly reset per call. Stale entries can show line numbers or variable names that don't match your current buffer (e.g. `parse error at line 4` when your line 4 has no syntactic issue, or `:$.SIGNUSER Incompatible data types` from an earlier failed compile).
+There are three places compile errors surface — each with different reliability:
 
-**Authoritative signal sequence:**
-1. Use the bridge's `status` field on `priority.prepareForm` response. `"compiled successfully"` = real success, ignore any FORMPREPERRS contents.
-2. If the bridge reports ambiguous failure, test by opening the form via `getRows` — form opens = actually succeeded.
-3. Only after confirming a real failure do you look at FORMPREPERRS. Cross-check each entry's line numbers and referenced variables against the CURRENT buffer. If they don't match, they're stale — don't chase them.
+| Source | Reliability | Notes |
+|---|---|---|
+| `PREPERRMSGS` table (SQLI) | **Authoritative** — reflects the server's current compile state | Query: `SELECT FORMNAME, COLNAME, TRIGNAME, MESSAGE, LINE FROM PREPERRMSGS WHERE FORMNAME = '<X>' OR MAINFORM = '<X>' FORMAT;` |
+| `websdk_form_action FORMPREPERRS getRows` | **Stale** — filtered view, can return `{}` even when PREPERRMSGS has errors | UI-facing form; session/user scoped; do not treat `{}` as clean |
+| `websdk_form_action compile` compound op | **Can lie** — returned "התכנית הסתיימה בהצלחה" in observed cases while PREPERRMSGS had 2 real errors and `getRows` on the form returned "המסך לא מוכן" | Treat as a hint only, not a confirmation |
 
-When the bridge's compound-op `FORMPREPERRS` fix is installed (patch in `bridge/src/websdk/compounds.ts` uses `FORMPREPERRS` form instead of broken `ERRMSGS` table lookup), this ambiguity goes away and the `status` + inline error text become definitive. Until then, belt-and-suspenders: trust the bridge's status, verify by opening the form.
+**Triangulate — trust `compile` only when BOTH verifications pass:**
+1. Run the compile compound op.
+2. Query `PREPERRMSGS` via SQLI for rows where `FORMNAME = '<entity>' OR MAINFORM = '<entity>'`. Zero rows = clean.
+3. Run `getRows` on the entity via WebSDK. Form opens cleanly = ready. `המסך לא מוכן` = still broken.
+
+If any of (2) or (3) fails, the compile **is not clean** regardless of what the op status said.
+
+*(Observed 2026-04-24 on SOF_INVDOCS: compile op returned success across 3 consecutive attempts while PREPERRMSGS retained the same 2 SUPNAME/CUSTNAME parse errors and the form never opened. The op's success message reflects only the compile driver completing without crashing — it does not reflect whether the produced form artifact is usable.)*
+
+#### FORMPREPERRS staleness (separate pitfall)
+
+Beyond the reliability question above, `FORMPREPERRS getRows` carries entries from the previous compile when nothing has rewritten them — the form is overwritten per compile, but state persists across sessions. So a fresh-session `getRows` can show line numbers or variable names that refer to earlier compile attempts on the same entity. Cross-check each entry against the current buffer before chasing it. Prefer `PREPERRMSGS` SQLI for both freshness and completeness.
+
+When the bridge's compound-op `FORMPREPERRS` fix is installed (patch in `bridge/src/websdk/compounds.ts` uses `FORMPREPERRS` form instead of broken `ERRMSGS` table lookup), this ambiguity improves, but PREPERRMSGS remains the authoritative source.
 
 ### FCLMNA gap: conditional visibility (COND) not reachable via WebSDK
 
@@ -620,7 +638,11 @@ FCLMNA exposes only `EXPR` via WebSDK. The `COND` / `BIG` field that drives "sho
 
 ### Join metadata placement
 
-Join info (`JTNAME`, `JCNAME`, `IDJOINE`) goes on the **base-table FCLMN row**, NOT on the imported display column. Project rule: `IDJOINE` values in custom forms must be `> 5`. The underlying FORMCLMNS column is named `IDJOIN` (no trailing E — that's the EFORM alias) with width 2 — values up to 99 are accepted.
+Join info (`JTNAME`, `JCNAME`, `IDJOINE`) goes on the **base-table FCLMN row**, NOT on the imported display column. Project rule: `IDJOINE` values in custom forms must be `> 5`.
+
+⚠ `IDJOINE` (the EFORM-layer alias) is **`CHAR(1)`**, accepting only `0`–`9`, `?`, or `!` — NOT multi-digit integers. Setting `IDJOINE="10"` via `fieldUpdate` fails with `סמן מספר מ-0 עד 9 ובנוסף אפשרי ? או !`.
+
+The underlying `FORMCLMNS.IDJOIN` column (no trailing E) is `INT width=2` in the raw table schema — but the EFORM UI/WebSDK layer encodes join IDs as single characters. When you see multi-digit values like `10` in a `SELECT FORMCLMNS.IDJOIN` dump, those are integer codes in the raw table; treat them as opaque and only set `IDJOINE` through the EFORM view with 1-char values.
 
 ### Add a subform link (generic, minimal)
 

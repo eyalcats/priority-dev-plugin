@@ -164,16 +164,40 @@ Scratch triggers travel in packs. After fixing one compile error and recompiling
 
 ```
 while true:
-  compile(entity)
-  if clean → stop
-  errors = getRows(FORMPREPERRS)
-  if errors == previous_errors → stalled, report to user
+  compile(entity)                                   # WebSDK compile compound op
+  errors = SELECT ... FROM PREPERRMSGS              # AUTHORITATIVE — see §"Reading compile state" below
+               WHERE FORMNAME = <entity>
+                  OR MAINFORM  = <entity>
+  form_ok = websdk getRows(<entity>)                # cross-check: does the form open?
+  if errors == [] AND form_ok == ok → stop          # truly clean
+  if errors == previous_errors AND form_ok unchanged → stalled, report to user
   for each error in errors:
     classify → triage query → propose fix → (await approval) → apply fix
   continue
 ```
 
 Count iterations. If more than ~5 passes don't converge, stop and ask the user — you're probably chasing a design issue, not a bug.
+
+### Reading compile state — three signals, only one is authoritative
+
+| Signal | What it tells you | Trust level |
+|---|---|---|
+| `PREPERRMSGS` table via SQLI | Current compile errors for the entity | **Authoritative** |
+| `websdk_form_action compile` status | Whether the compile driver exited without crashing | Not a cleanliness signal — observed returning "התכנית הסתיימה בהצלחה" with 2 unresolved errors in `PREPERRMSGS` |
+| `FORMPREPERRS` form via `getRows` | Session-filtered, stale across runs | Can return `{}` while errors exist |
+
+**Always query `PREPERRMSGS` directly:**
+```sql
+SELECT FORMNAME, COLNAME, TRIGNAME, MESSAGE, SEVERITY, LINE
+FROM   PREPERRMSGS
+WHERE  FORMNAME = '<ENTITY>' OR MAINFORM = '<ENTITY>'
+ORDER  BY LINE
+FORMAT;
+```
+
+Zero rows here + the form opens via `getRows` = the entity is truly clean. Anything else = keep debugging.
+
+*(Observed 2026-04-24 on SOF_INVDOCS: compile op reported success three consecutive times while PREPERRMSGS retained the same 2 SUPNAME/CUSTNAME parse errors and the form returned `המסך לא מוכן`. An automated chain that trusted only the compile op status would have declared clean and moved on.)*
 
 ---
 
