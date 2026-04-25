@@ -56,6 +56,34 @@ All custom entities must start with a **four-letter prefix** (e.g., `ACME_ORDERS
 - Join IDs and column IDs in custom forms must be > 5.
 - Assign module "Internal Development" to all custom entities.
 
+## Quick Recipes (routine tasks)
+
+For everyday Priority changes, read the matching recipe in `recipes/` and run it end-to-end. Each recipe is self-contained (preconditions, calls, post-verify). For tasks not in this list, fall back to the topical `references/*.md`.
+
+| Task phrasing                                                  | Recipe                                |
+|----------------------------------------------------------------|---------------------------------------|
+| add a column / add a field                                     | recipes/add-column.md                 |
+| add a column with a join / foreign key                         | recipes/add-column-with-join.md       |
+| add a column with an expression / formula / computed           | recipes/add-column-with-expression.md |
+| hide a column / hide a field                                   | recipes/hide-column.md                |
+| add a subform link / link a subform                            | recipes/add-subform-link.md           |
+| create a subform                                               | recipes/create-subform.md             |
+| create a text subform                                          | recipes/create-text-subform.md        |
+| add a form trigger / form-level trigger                        | recipes/add-form-trigger.md           |
+| add a column trigger / POST-FIELD / CHECK-FIELD on a column    | recipes/add-column-trigger.md         |
+| add a direct activation                                        | recipes/add-direct-activation.md      |
+| compile a form                                                 | recipes/compile-form.md               |
+| read compile errors                                            | recipes/read-compile-errors.md        |
+| create a custom table                                          | recipes/create-table.md               |
+| create a root form                                             | recipes/create-root-form.md           |
+| list a form's columns                                          | recipes/list-form-columns.md          |
+| find a form's ID                                               | recipes/find-form-id.md               |
+| create a procedure                                             | recipes/create-procedure.md           |
+| add a procedure step                                           | recipes/add-procedure-step.md         |
+| run an interface                                               | recipes/run-interface.md              |
+| copy / duplicate entity (form, report, procedure, interface)   | recipes/copy-entity.md                |
+| upgrade form changes (deploy via UPGRADES)                     | recipes/upgrade-form-changes.md       |
+
 ## Development Workflow
 
 ### Writing Form Triggers
