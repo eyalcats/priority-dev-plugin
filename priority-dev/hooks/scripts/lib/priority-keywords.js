@@ -1,13 +1,27 @@
 // Case-insensitive whole-word match for Priority-flavored prompts.
-// Tuned conservatively — false positive is cheap, false negative reintroduces the bug.
+//
+// Tightened in v1.8.10: dropped over-broad single English words that fired in
+// every non-Priority frontend / general-coding conversation (trigger, procedure,
+// form, column, compile, prepare, report, interface, LINK, UNLINK, shell).
+// Kept all Priority-specific identifiers (system table names, SQLI dialect,
+// WINDBI tool, hyphenated trigger types, etc.) plus the literal word "Priority"
+// so users can opt in explicitly when their prompt is about Priority work but
+// doesn't happen to mention any of the specific identifiers.
+//
+// Trade-off: false negatives are now possible on prompts like "fix this trigger"
+// without other Priority context. Mitigation: the user can include "Priority"
+// or the specific identifier (SQLI, WINDBI, FORMTRIG, etc.) — and the
+// priority-sdk skill + MCP server still ground the agent independently when
+// invoked.
 
 const KEYWORDS = [
-  'trigger', 'procedure', 'form', 'subform', 'column', 'DBI', 'SQLI',
+  'subform', 'DBI', 'SQLI',
   'EFORM', 'FORMCLMN', 'FORMCLMNS', 'FORMTRIG', 'FORMEXEC', 'CODEREF',
-  'WINDBI', 'WebSDK', 'compile', 'prepare', 'report', 'interface',
-  'UPGRADES', 'GENERALLOAD', 'DBLOAD', 'Priority',
-  'WSCLIENT', 'MAILMSG', 'CHECK-FIELD', 'POST-FIELD', 'CHOOSE-FIELD',
-  'HTMLDOC', 'ERRMSG', 'WRNMSG', 'LINK', 'UNLINK', 'shell',
+  'WINDBI', 'WebSDK', 'WSCLIENT', 'MAILMSG', 'HTMLDOC',
+  'UPGRADES', 'GENERALLOAD', 'DBLOAD',
+  'CHECK-FIELD', 'POST-FIELD', 'CHOOSE-FIELD',
+  'ERRMSG', 'WRNMSG',
+  'Priority',
 ];
 
 function escapeRegex(s) {
