@@ -39,6 +39,16 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Imported columns work at `IDCOLUMNE > 0` when the base column carries matching `JTNAME`/`JCNAME` at the same `IDJOINE` value.
 - **See:** `forms.md` § "Private Development on System Forms".
 
+### Setting `IDCOLUMNE = 6` on a column added to a custom-table form
+- **Symptom:** Form compiles fine; new column appears in the UI; user types any value (e.g., `1`) and gets `ערך '1' לא קיים בעמודה '<col>' בטבלת '<form-title>'` ("value '1' does not exist in column …"). Looks like a foreign-key validation error even though no join was configured.
+- **Root cause:** `IDCOLUMNE = 6` on a custom-table form (`SOF_*`, `ASTR_*`, etc.) tells Priority "this is an imported-column instance" — but with no `JTNAME`/`JCNAME` to import from, the validator points at the column's own table and rejects every value as "not found in the lookup". The `IDCOLUMNE >= 6` rule in older recipes is for **custom columns on SYSTEM forms** (over `INVOICES`, `DOCUMENTS`, etc.), not for columns on custom-table forms.
+- **Wrong:** Default to `IDCOLUMNE = 6` for any custom column. Adding a CHOOSE-FIELD trigger to "fix" the lookup. Adding an empty `JTNAME` to silence the validator.
+- **Right:** Match the form's existing convention. Read FCLMN on the parent form first — if every other column has `IDCOLUMNE = 0`, yours must too.
+  - **Custom-table form** (form `TNAME` starts with `SOF_`, `ASTR_`, etc.) → `IDCOLUMNE = 0`.
+  - **System-table form** (form `TNAME` is `INVOICES`, `DOCUMENTS`, `ORDERS`, etc.) → `IDCOLUMNE >= 6`.
+- **Fix on an already-saved column:** `EFORM filter ENAME=<form> → setActiveRow → startSubForm FCLMN → filter NAME=<col> → setActiveRow → fieldUpdate(IDCOLUMNE, "0") → saveRow → compile`.
+- **See:** `recipes/add-column.md`, `websdk-cookbook.md` § "Add a column to a form", verified 2026-04-25 on `SOF_CUSTSIGN.REMARKS`.
+
 ### Writing a scalar subquery in `FCLMNA.EXPR`
 - **Wrong:** Parser rejects `SELECT` in an expression with `parse error at or near symbol SELECT`.
 - **Right:** Use a real join (imported column from joined table) or a POST-UPDATE trigger that assigns the computed value.

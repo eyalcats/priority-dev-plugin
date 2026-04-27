@@ -415,7 +415,10 @@ To unhide: `SET HIDE = ''`.
 
 For hidden columns add `{"op": "fieldUpdate", "field": "HIDEBOOL", "value": "Y"}` before saveRow.
 
-For private dev columns (SOF_ prefix) on system tables, add `{"op": "fieldUpdate", "field": "IDCOLUMNE", "value": "6"}`.
+**`IDCOLUMNE` value depends on the form's base table — not on the column's prefix.**
+- **Custom-table form** (form's `TNAME` is `SOF_*`, `ASTR_*`, etc.): use `IDCOLUMNE = 0`. Matches what every other column on the form already has.
+- **System-table form** (form's `TNAME` is `INVOICES`, `DOCUMENTS`, `ORDERS`, etc.): use `IDCOLUMNE >= 6`. `0` is reserved for system columns.
+- Setting `IDCOLUMNE = 6` on a custom-table form with no join target compiles fine but breaks data entry: Priority treats the column as an "imported instance" and rejects every value with `ערך 'X' לא קיים בעמודה ...` ("value X does not exist in column"). Verified 2026-04-25 on `SOF_CUSTSIGN.REMARKS`.
 
 **For CHAR(1) Y/N columns that should render as a checkbox in the web client**, add `{"op": "fieldUpdate", "field": "BOOLEAN", "value": "Y"}`. Without this, the column displays as a 1-character text input. Verified 2026-04-15.
 

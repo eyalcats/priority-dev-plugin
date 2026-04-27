@@ -82,6 +82,7 @@ For everyday Priority changes, read the matching recipe in `recipes/` and run it
 | add a procedure step                                           | recipes/add-procedure-step.md         |
 | run an interface                                               | recipes/run-interface.md              |
 | copy / duplicate entity (form, report, procedure, interface)   | recipes/copy-entity.md                |
+| delete entity (form / report / procedure / menu / trigger / field / direct activation) | recipes/delete-entity.md |
 | upgrade form changes (deploy via UPGRADES)                     | recipes/upgrade-form-changes.md       |
 
 ## Development Workflow

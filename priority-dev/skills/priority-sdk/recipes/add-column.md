@@ -6,7 +6,9 @@
 - Verify the form name via `websdk_form_action` on EFORM with `filter ENAME=<form>` (form name is NOT the same as the table name — e.g. `ACCOUNTS_PAYABLE` → `ACCOUNTS`). If 0 rows, ask the user; do NOT propose a plausible alternative.
 - Confirm the base table behind the form (`MAINTABLE`/`TNAME` on EFORM, or `displayTableColumns <table>`).
 - Pick a `POS` slot that does not collide with existing columns (read FCLMN first).
-- For custom columns on system forms: pick `IDCOLUMNE >= 6` (system reserves 0).
+- Pick the right `IDCOLUMNE` based on the form's base table:
+  - **Custom-table form** (`SOF_*`, `ASTR_*`, etc.): `IDCOLUMNE = 0`. Match what every other column on the form already uses. Setting `6` here makes Priority treat the column as an "imported instance" with no join target — saved values fail validation with `ערך 'X' לא קיים בעמודה ...` ("value X does not exist in column …") on data entry.
+  - **System-table form** (`INVOICES`, `DOCUMENTS`, `ORDERS`, etc.): `IDCOLUMNE = 6` (or any value >= 6). System reserves `0`.
 
 **Calls:**
 1. `websdk_form_action` on EFORM, single compound:
@@ -21,7 +23,7 @@
      {"op":"fieldUpdate","field":"CNAME","value":"<COL>"},
      {"op":"fieldUpdate","field":"TNAME","value":"<TABLE>"},
      {"op":"fieldUpdate","field":"POS","value":"<POS>"},
-     {"op":"fieldUpdate","field":"IDCOLUMNE","value":"6"},
+     {"op":"fieldUpdate","field":"IDCOLUMNE","value":"<0 for custom-table form, 6 for system-table form>"},
      {"op":"saveRow"}
    ]}
    ```

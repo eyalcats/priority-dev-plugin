@@ -1,6 +1,6 @@
 {
   "name": "priority-dev",
-  "version": "1.8.10",
+  "version": "1.8.11",
   "description": "Priority ERP development tools for Claude Code — skill, agents, commands, and hooks for the Priority VSCode bridge",
   "skills": "./skills/",
   "commands": "./commands/",
@@ -9,7 +9,8 @@
     "./agents/researcher.md",
     "./agents/verifier.md",
     "./agents/curator.md",
-    "./agents/compile-doctor.md"
+    "./agents/compile-doctor.md",
+    "./agents/learning-extractor.md"
   ],
   "hooks": {
     "SessionStart": [
