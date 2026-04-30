@@ -1,0 +1,58 @@
+# Priority Optimizer rule catalog
+#
+# Each entry is one lint rule. Schema:
+#
+#   id:          string, ALL-CAPS, hyphen-delimited. Stable; used in finding IDs.
+#                Convention: <ENTITY-TYPE>-<DESCRIPTION>, e.g. FORM-IDCOLUMNE-WRONG.
+#   category:    correctness | perf | antipattern
+#   severity:    block | warn | info
+#   applies_to:  list of EXEC TYPE letters. F=form, P=procedure.
+#   title:       one-line human summary.
+#   description: multi-line explanation (markdown OK).
+#   detection:   sql | sql+llm | llm
+#   detection_query: only for sql / sql+llm. SQL using ':ENTITY' as the
+#                placeholder for the input entity name (single-quoted at
+#                substitution time). One row returned = one finding.
+#   llm_prompt:  only for sql+llm / llm. Markdown instructions to the
+#                analyzer LLM. Must demand concrete evidence (step name,
+#                column name, line range) for every fired finding.
+#   fix_recipe:  paste-ready fix for optimizer-fix to apply. Use the same
+#                ':ENTITY' placeholder. WebSDK ops or SQLI as the change
+#                requires.
+#   reference:   pointer to the canonical reference file (priority-sdk/references/...).
+#
+# Detection-type cheatsheet:
+#
+#   sql      — pure metadata predicate. Fastest, deterministic. One returned
+#              row = one finding. Use for anti-patterns expressible as a
+#              FORMCLMNS/FORMTRIG/PROCSTEP filter.
+#   sql+llm  — SQL narrows candidates; LLM reads body text and confirms.
+#              Use when SQL identifies suspects but only reasoning over
+#              the body decides if it's a real issue.
+#   llm      — reasoning over the full entity dump. Use for graph/flow
+#              questions (unreachable steps, dead variables, COND-always-X).
+#
+rules:
+  - id: FORM-IDCOLUMNE-WRONG
+    category: antipattern
+    severity: block
+    applies_to: [F]
+    title: "IDCOLUMNE>=6 on a custom-table form"
+    description: |
+      Custom-table forms (TNAME starts with SOF_, ASTR_, etc.) must use
+      IDCOLUMNE=0. Setting IDCOLUMNE>=6 makes Priority try to import the
+      column from a join that does not exist. Form compiles fine; data
+      entry breaks with "ערך X לא קיים בעמודה" on every value entered.
+    detection: sql
+    detection_query: |
+      SELECT C.NAME, C.IDCOLUMNE, F.TNAME
+      FROM   FORMCLMNS C, EFORM F
+      WHERE  F.EXEC = C.FORM
+      AND    F.ENAME = ':ENTITY'
+      AND    (F.TNAME LIKE 'SOF\_%' OR F.TNAME LIKE 'ASTR\_%')
+      AND    C.IDCOLUMNE >= 6
+    fix_recipe: |
+      EFORM filter ENAME=:ENTITY → setActiveRow → startSubForm FCLMN
+      → filter NAME=<col> → setActiveRow → fieldUpdate(IDCOLUMNE,'0')
+      → saveRow → compile.
+    reference: "common-mistakes.md § 'Setting IDCOLUMNE = 6 on a column added to a custom-table form'"

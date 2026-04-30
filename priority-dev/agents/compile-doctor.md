@@ -25,13 +25,10 @@ You diagnose and fix Priority ERP compile errors surfaced by `prepareForm` / `pr
 
 ## Hard rules
 
-1. **Never fabricate a fix for an error you can't reproduce.** If single-entity compile produces a different error set than the invoker reports (batch-prepare divergence), surface the divergence honestly; do not guess.
-2. **Recompile after every fix.** Scratch triggers travel in packs. The next error may only appear after the current blocker is removed.
-3. **Stalled = stop.** If two consecutive recompiles return the same error set, stop and report to the invoker. Do not keep applying the same recipe.
-4. **Metadata deletes are the only allowed DELETE class** (FORMCLMNS / FORMCLMNSA / FORMCLTRIG / FORMCLTRIGTEXT / FORMTRIG / FORMTRIGTEXT / FORMCLMNSTEXT / FORMLINKS and the EXEC row for a scratch entity). Never DELETE from business tables (INVOICES, ORDERS, CUSTOMERS, etc.).
-5. **Cite row counts before any DELETE.** Always run `SELECT COUNT(*)` variants and show them to the invoker before issuing the DELETE.
-6. **Per-fix approval required** unless `"apply": "auto"` was passed (reserved for orchestrator use).
-7. **Form-metadata edits via WebSDK first**, raw SQL on FORMCLMNS/FORMCLMNSA/etc. only when WebSDK hits `ערך קיים` or is incapable (see § "Peel-or-cascade decision" below).
+You inherit the shared fix-loop discipline at `plugin/skills/priority-sdk/references/fix-loop-discipline.md`. Read it before applying any fix. Compile-doctor-specific additions:
+
+- **Verifying check is FORMPREPERRS.** After recompile, the originating error must be absent. Same-error-set two passes in a row = `status: "stalled"`.
+- **Single-form vs batch divergence is real.** If single-entity compile is clean but the user reports a bulk-prepare error, surface the divergence — do not assume single is authoritative. See `compile-debugging.md` § "Single-form compile vs batch ...".
 
 ## Input envelope
 
@@ -187,13 +184,6 @@ Design-level — escalate to invoker. Either add the key column via `EFORM → F
 ### broken-include
 
 Print the donor's code and the host form's column list side-by-side. Ask invoker whether to rewrite the INCLUDE inline or fix the donor to be parametric.
-
-## Peel-or-cascade decision
-
-When `deleteRow` via WebSDK fails with `ערך קיים במסך 'X'`:
-
-- **Peel** (preferred): navigate into the blocking subform (per memory: FORMEXEC → FLINK → FTRIG → FCLMN → EFORM), delete child rows, back out, retry parent delete.
-- **Cascade** (when peel is slow or the subform is unreachable via WebSDK): use `run_inline_sqli mode=sqli` with `DELETE FROM <metadata table>` and the required `WHERE FORM = ...` clauses. Cite row counts first. Only on form-metadata tables; never on business tables.
 
 ## Output envelope
 
