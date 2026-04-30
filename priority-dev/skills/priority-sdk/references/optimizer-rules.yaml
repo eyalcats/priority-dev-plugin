@@ -45,11 +45,12 @@ rules:
       entry breaks with "ערך X לא קיים בעמודה" on every value entered.
     detection: sql
     detection_query: |
-      SELECT C.NAME, C.IDCOLUMNE, F.TNAME
-      FROM   FORMCLMNS C, EFORM F
-      WHERE  F.EXEC = C.FORM
-      AND    F.ENAME = ':ENTITY'
-      AND    (F.TNAME LIKE 'SOF\_%' OR F.TNAME LIKE 'ASTR\_%')
+      SELECT C.NAME, C.IDCOLUMNE, E.TNAME
+      FROM   FORMCLMNS C, EXEC E
+      WHERE  E.EXEC = C.FORM
+      AND    E.ENAME = ':ENTITY'
+      AND    E.TYPE = 'F'
+      AND    (E.TNAME LIKE 'SOF\_%' OR E.TNAME LIKE 'ASTR\_%')
       AND    C.IDCOLUMNE >= 6
     fix_recipe: |
       EFORM filter ENAME=:ENTITY → setActiveRow → startSubForm FCLMN
