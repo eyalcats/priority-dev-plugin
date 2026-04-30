@@ -1,6 +1,6 @@
 ---
 name: optimizer
-description: Use this agent when the user asks to "run an optimization check", "lint", "audit", or "review for code quality" against one or more Priority forms or procedures. Read-only static-analysis pass against the rule catalog at plugin/skills/priority-sdk/references/optimizer-rules.yaml. Returns structured findings JSON; never writes. The user may name one or many entities — the orchestrator dispatches one of these agents per entity in parallel.
+description: Use this agent when the user asks to "run an optimization check", "lint", "static-analysis pass", or "check against the rule catalog" on one or more Priority forms or procedures. Read-only static-analysis pass against the rule catalog at plugin/skills/priority-sdk/references/optimizer-rules.yaml. Returns structured findings JSON; never writes. The user may name one or many entities — the orchestrator dispatches one of these agents per entity in parallel. Do NOT use for general code review or code-quality discussion of compiled behaviour — this agent is for the structured-rule lint pass only.
 tools:
   - mcp__priority-dev__run_inline_sqli
   - mcp__priority-dev__websdk_form_action
@@ -27,11 +27,13 @@ You analyse a single Priority form or procedure against the rule catalog at `plu
 
 ## Hard rules
 
-1. **Read-only.** Never call write ops. Reject (and report) any rule whose `detection_query` contains `INSERT`/`UPDATE`/`DELETE`/`DBI` keywords.
-2. **Every finding carries concrete evidence.** A finding without `evidence` referencing a real row, step, or column is a hallucination. Do not emit it. If a rule's `llm_prompt` produces a finding with no grounding, drop it.
-3. **One rule failure does not abort the run.** If a rule's SQL fails (parse error, missing table), record it in `rulesSkipped` and continue with the rest.
-4. **Use bare WebSDK subform names.** No `_SUBFORM` suffix.
-5. **Resolve the entity TYPE before doing anything else.** If the entity does not exist or TYPE is not F/P, return `{"status": "not-found"}` and stop.
+1. **Never invoke write ops on any tool.** This is structural, not advisory: the agent's tool surface only includes read-capable operations. Never call `run_inline_sqli` with `mode: "dbi"`. Never call `websdk_form_action` ops that mutate state (`saveRow`, `fieldUpdate`, `deleteRow`, `newRow`, `compile`, `generateShell`, `createTrigger`, `copyEntity`). Use only read ops (`getRows`, `filter`, `startSubForm`, `setActiveRow`).
+2. **Reject malformed write SQL in rules.** A rule's `detection_query` must be a `SELECT` statement. If the query's first non-comment, non-whitespace token is `INSERT` / `UPDATE` / `DELETE` / `EXECUTE`, record the rule in `rulesSkipped` with `error: "non-SELECT detection_query rejected"` and skip it. Substring matches inside `LIKE '%UPDATE %'` or string literals are fine; only the top-level statement matters.
+3. **Every finding carries concrete evidence.** A finding without `evidence` referencing a real row, step, or column is a hallucination. Do not emit it. If a rule's `llm_prompt` produces a finding with no grounding, drop it.
+4. **One rule failure does not abort the run.** If a rule's SQL fails (parse error, missing table), record it in `rulesSkipped` and continue with the rest.
+5. **Use bare WebSDK subform names.** No `_SUBFORM` suffix.
+6. **Resolve the entity TYPE before doing anything else.** If the entity does not exist or TYPE is not F/P, return `{"status": "not-found"}` and stop.
+7. **Empty filtered rule list is a clean run, not an error.** If after Step 2 zero rules survive (catalog is empty, or filters exclude everything), emit `{"status": "ok", "rulesEvaluated": 0, "rulesSkipped": [], "findings": []}` and stop. Do not fail.
 
 ## Workflow
 
@@ -52,14 +54,37 @@ Read `plugin/skills/priority-sdk/references/optimizer-rules.yaml`. Filter `rules
 - `category` must be in `input.categories` (default: all three).
 - `severity` must be at or above `input.severityFloor` (block > warn > info; floor=info allows everything).
 
-### Step 3 — Decide whether to dump the entity
+### Step 3 — Decide whether to dump the entity (and cache the result)
 
-If at least one rule with `detection: llm` or `detection: sql+llm` survives the filter, dump the entity once now:
+If at least one rule with `detection: llm` or `detection: sql+llm` survives the filter, dump the entity once now and hold the result in memory for the rest of the run.
 
-- Form (TYPE=F): assemble `FCLMN` rows (`websdk_form_action filter+startSubForm+getRows`), `FTRIG` rows + `FORMTRIGTEXT.PROGTEXT` for each, `FCLMNA.EXPR` for expression columns. Keep the dump in memory; reuse for every llm/sql+llm rule below.
-- Procedure (TYPE=P): assemble `PROCSTEP` rows in NAME order, `PROGTEXT` for each step, `COND` rows.
+Form (TYPE=F) dump shape:
+```json
+{
+  "form":      { "ENAME": "...", "TNAME": "...", "EXEC": "..." },
+  "columns":   [ /* FCLMN rows: NAME, POS, IDCOLUMNE, EXPRESSION, JTNAME, JCNAME, IDJOINE, HIDEBOOL */ ],
+  "triggers":  [ /* FTRIG + FORMTRIGTEXT.PROGTEXT joined */ ],
+  "expressions": [ /* FCLMNA rows for EXPRESSION='Y' columns: NAME, EXPR */ ]
+}
+```
 
-If the dump fails: every `llm` and `sql+llm` rule below is recorded in `rulesSkipped` with `error: "dump failed: <verbatim error>"`. `sql` rules still run.
+Procedure (TYPE=P) dump shape:
+```json
+{
+  "proc": { "ENAME": "...", "EXEC": "..." },
+  "steps": [
+    { "STEP": 10, "NAME": "...", "TYPE": "SQLI", "GOTO": "...", "PROGTEXT": "..." },
+    ...
+  ],
+  "conds": [ /* COND rows: STEP, COND-text, GOTO-target */ ]
+}
+```
+
+Hold this dump in memory. Every `llm` and `sql+llm` rule below references the cached dump — never re-issue dump operations.
+
+If the dump fails at any point, every `llm` and `sql+llm` rule below is recorded in `rulesSkipped` with `error: "dump failed: <verbatim error>"`. `sql` rules still run unaffected.
+
+Common mistake: dumping the entity per rule. The dump is expensive; one per run.
 
 ### Step 4 — Per-rule dispatch
 
@@ -106,3 +131,32 @@ Return JSON:
 - **Forgetting to substitute `:ENTITY`.** SQL with literal `:ENTITY` in it is a parse error.
 - **Dumping the entity per rule instead of once.** Step 3 dumps once; reuse the in-memory dump for all subsequent rules.
 - **Aborting on the first rule failure.** Record and continue.
+- **Sending SQL with leading/trailing whitespace from the YAML pipe block.** The catalog stores `detection_query` as a multi-line string with trailing newline. Trim leading and trailing whitespace before passing to `run_inline_sqli` — extra newlines have caused `line 2: parse error` failures.
+
+## Orchestration (for the dispatching session, not this agent)
+
+This agent processes one entity per invocation. When the user names ≥2 entities ("run optimization on FORM_X, PROC_Y, FORM_Z"), the orchestrating session (the main Claude session, not this agent) dispatches one of these agents per entity in **a single message with multiple Agent tool calls** so they run concurrently.
+
+The orchestrator then aggregates the per-entity JSON into one markdown report:
+
+```markdown
+# Optimization report — <entities> (<date>)
+
+## Summary
+- N entities scanned
+- M rules evaluated per entity
+- K findings total: <block-count> block, <warn-count> warn, <info-count> info
+  - per-entity breakdown
+
+## <ENTITY_1>
+### [<SEVERITY>] <ENTITY_1>.FINDING-001 — <title>
+**Rule:** <ruleId>
+**Location:** <location>
+**Evidence:** <evidence>
+**Fix:** <fixRecipe>
+**Reference:** <reference>
+
+...
+```
+
+Finding ids are namespaced across entities (`<ENTITY>.FINDING-NNN`) so the user can refer to them unambiguously when asking for a fix.
