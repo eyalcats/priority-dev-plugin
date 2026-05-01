@@ -1317,3 +1317,77 @@ Per the project rule "form interface over raw UPDATE", production interface chan
 2. **Raw SQLI on INTERCLMNSFILE** — only for static EDI setups where business triggers on INTERCLMNSFILE are not needed, and only with explicit user approval per the "form interface over raw UPDATE" rule.
 
 See § "Dynamic Interfaces" above for the `-form` pattern.
+
+---
+
+## Verified Real-World Patterns
+
+### Canonical EXECUTE INTERFACE pattern with ERRMSGS readback
+
+A harvest of ~200 live `EXECUTE INTERFACE` call sites in FORMTRIGTEXT, FORMCLTRIGTEXT, and PROGRAMSTEXT shows a consistent shape (~80% of call sites). The skill previously documented STACKERR as the error readback method — production code uses ERRMSGS uniformly for single-interface flows.
+
+```sql
+SELECT SQL.TMPFILE INTO :TMP FROM DUMMY;
+LINK GENERALLOAD TO :TMP;
+GOTO 8888 WHERE :RETVAL <= 0;        /* LINK guard — abort if link fails */
+/* ... INSERT INTO GENERALLOAD rows ... */
+EXECUTE INTERFACE 'MY_INTERFACE', SQL.TMPFILE, '-L', :TMP;
+SELECT MESSAGE INTO :MSG FROM ERRMSGS
+ WHERE USER = SQL.USER AND TYPE = 'i';
+GOTO 9999 WHERE :RETVAL <= 0;        /* :RETVAL = 0 means no error rows found */
+:PAR1 = STRIND(:MSG, 1, 60);
+:PAR2 = STRIND(:MSG, 61, 120);
+WRNMSG 500;
+LABEL 9999;
+LABEL 8888;
+UNLINK GENERALLOAD;
+```
+
+**Key facts distilled from the harvest:**
+
+- Always read errors from `ERRMSGS WHERE USER = SQL.USER AND TYPE = 'i'` (not `STACK_ERR`).
+- Always guard the LINK with `GOTO WHERE :RETVAL <= 0`.
+- `GOTO 9999 WHERE :RETVAL <= 0` after the ERRMSGS SELECT: `:RETVAL = 0` means no error rows — safe to skip the warning.
+- TLOAD and WLOAD call sites are structurally identical — no separate error-readback path.
+- **Empty-batch guard is mandatory.** Running `EXECUTE INTERFACE` on an empty GENERALLOAD (zero INSERT rows) causes a DUMP. Add a `GOTO <label> WHERE :RETVAL <= 0` after the INSERT block before calling EXECUTE INTERFACE.
+- Optional `KEY1`/`KEY2`/`KEY3`/`KEY4` readback from GENERALLOAD retrieves IDs of created entities after a successful run.
+- Argument grammar: `EXECUTE INTERFACE 'NAME', <msgfile>, [flags...] '-L', <linkfile>`
+- Common flags: `-L` (link file), `-nl` (no load), `-m` (message), `-o` (output only), `-w` (warnings as errors), `-enforcebpm`, `-debug`, `-i`.
+
+`STACK_ERR` with `-stackerr` flag is the correct approach only when running **multiple interfaces in sequence** where each run might overwrite earlier errors — documented in § "The STACK_ERR Table" above.
+
+*(seen in: ~200 EXECUTE INTERFACE call sites harvested from FORMTRIGTEXT, FORMCLTRIGTEXT, PROGRAMSTEXT — 2026-04-30)*
+
+---
+
+### EINTER vs LOAD generator forms — TYPE distinction and subform map
+
+Two distinct generator forms create interface entities. Pick based on the interface kind:
+
+| Generator form | EXEC.TYPE | Creates | Use for |
+|---|---|---|---|
+| `EINTER` (Form Load Designer) | `'I'` | INTERFACE program (TLOAD + WLOAD) | Importing/exporting form data |
+| `LOAD` (Characteristics for Download) | `'L'` | DBLOAD program | Importing external flat files into a staging table |
+
+**Important:** The same ENAME can have multiple EXEC rows with different TYPE values (e.g., `LOADCUST` has F + I + L + M + P rows). Always filter by `TYPE` when querying EXEC:
+
+```sql
+SELECT EXEC, ENAME, TYPE FROM EXEC WHERE ENAME = 'LOADCUST' FORMAT;
+```
+
+**Verified EINTER subforms (EXEC.TYPE = 'I'):**
+- `INTERFORMS` → `INTERCLMNS` — column mappings; auto-routes to one of:
+  - `INTERCLMNSFILE` — file-field column mappings
+  - `INTERCLMNSFILEOUT` — output file-field mappings
+  - `INTERCLMNSRECORDTYPE` — record-type scoped mappings
+  - `INTERCLMNSDEFAULT` — default value assignments
+- `INTERFXMLTAGS` — XML/JSON tag definitions
+
+**Wrong subform names** (do not exist — verified): `INTERFACEFORMS`, `FORMINTERFACES`, `INTERFLD`, `INTRFCFRM`, `EINTERA`, `EINTER1`, `EINTERTAGS`, `FORMS`, `INTERFACE`.
+
+**INTERCLMNS field semantics:**
+- `NAME2` — source column name in the load table (e.g., `INT1`, `TEXT2`, `REAL1`)
+- `FCNAME` — target form column name (the field receiving the value)
+- `POS` — ordering within the record-type column set
+
+*(seen in: TGML_PSERIESLOAD interface investigation + EINTER/LOAD harvest — 2026-04-30)*

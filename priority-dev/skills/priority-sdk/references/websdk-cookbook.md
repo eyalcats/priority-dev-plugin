@@ -529,6 +529,41 @@ Known failures where the UI Form Generator is still required:
 - Forms with special `FORMTYPE` (document headers)
 - If FORMPREP returns `אין מסך בשם זה` despite a clean EFORM row, compare with a known-good form's FCLMN/FLINK/FTRIG rows side-by-side to find what differs
 
+### Seed a singleton table's first row
+
+When a singleton PRE-INSERT guard is in place, `newRow → saveRow` via
+WebSDK will fail on row #1 (the guard rejects it as a "second row" —
+see `references/triggers.md` § "Singleton-table PRE-INSERT guard"). Seed
+row #1 via raw SQLI, then update content columns through the form:
+
+**Step 1 — seed the identity column via SQLI (bypasses PRE-INSERT intentionally):**
+```sql
+INSERT INTO TGML_PATHCFG (DUMMY) VALUES (1);
+```
+
+This is the only legitimate use of raw INSERT for a singleton: we are
+creating row #1, which by definition cannot satisfy a "no other row exists"
+guard. PRE-INSERT is bypassed here on purpose.
+
+**Step 2 — update content columns through the form (column triggers still fire):**
+```json
+[{"op":"filter","field":"DUMMY","value":"1"},
+ {"op":"getRows"},
+ {"op":"setActiveRow","row":1},
+ {"op":"fieldUpdate","field":"BASEPATH","value":"\\\\srv\\share"},
+ {"op":"saveRow"}]
+```
+
+WebSDK `fieldUpdate + saveRow` still fires POST-FIELD and CHECK-FIELD
+on the content columns. This satisfies the "form interface > raw UPDATE"
+project rule for columns that carry business meaning.
+
+**Backslash paths**: pass via `fieldUpdate` (the bridge carries the literal
+value). Raw SQLI INSERT requires backslash doubling in the string literal
+(`'\\\\srv\\share'`); `fieldUpdate` does not.
+
+*(seen in: TGML_PATHCFG singleton seed — verified 2026-05-01)*
+
 ### Create a subform + link it to a parent
 
 Subform creation is a **four-step sequence**. FLINK has no parent-key / child-key fields — Priority binds parent↔child by column name convention + FLINK metadata, without any explicit expression on the subform's link column.
@@ -631,6 +666,36 @@ Beyond the reliability question above, `FORMPREPERRS getRows` carries entries fr
 
 When the bridge's compound-op `FORMPREPERRS` fix is installed (patch in `bridge/src/websdk/compounds.ts` uses `FORMPREPERRS` form instead of broken `ERRMSGS` table lookup), this ambiguity improves, but PREPERRMSGS remains the authoritative source.
 
+### Known bridge behavior: session close auto-commits a half-built newRow
+
+If a `newRow` chain is abandoned before `saveRow` — either because an
+earlier op returned `status: 'error'` and the chain was aborted, or because
+the session closed mid-array — **Priority commits the in-progress row with
+whatever column values were set so far (defaulting unset columns to their
+table defaults).** This bypasses any PRE-INSERT trigger, because the row
+was not committed through the user-facing save path.
+
+Symptom: a stub row appears in the table (e.g., `DUMMY=0` for an INT column
+with no default) that should not exist.
+
+Prevention: always append `{"op":"undoRow"}` as the error-branch escape
+hatch in any chain that might abort after `newRow` but before `saveRow`.
+Never close the session between `newRow` and `saveRow`.
+
+```json
+/* Safe chain skeleton */
+[{"op":"newRow"},
+ {"op":"fieldUpdate","field":"DUMMY","value":1},
+ {"op":"fieldUpdate","field":"BASEPATH","value":"\\\\srv\\share"},
+ {"op":"saveRow"}]
+/* If any op returns error before saveRow, send: */
+[{"op":"undoRow"}]
+```
+
+*(seen in: TGML_PATHCFG DUMMY=0 stub row — root-caused 2026-05-01;
+earlier session had aborted after newRow + wrong fieldUpdate, and the
+auto-flush produced a stub that PRE-INSERT never checked.)*
+
 ### FCLMNA gap: conditional visibility (COND) not reachable via WebSDK
 
 FCLMNA exposes only `EXPR` via WebSDK. The `COND` / `BIG` field that drives "show column X only when TYPE='C'" is **not accessible**. Workarounds:
@@ -672,16 +737,38 @@ Note: the field is `FNAME` on FLINK (not `ENAME`).
   "form": "EFORM",
   "operations": [
     {"op": "filter", "field": "ENAME", "value": "MY_FORM"},
+    {"op": "getRows"},
     {"op": "setActiveRow", "row": 1},
     {"op": "startSubForm", "name": "FTRIG"},
     {"op": "newRow"},
     {"op": "fieldUpdate", "field": "TRIGNAME", "value": "PRE-INSERT"},
+    {"op": "fieldUpdate", "field": "TYPE", "value": "PRE-INSERT"},
     {"op": "saveRow"}
   ]
 }
 ```
 
-Field is `TRIGNAME` (not `NAME`). After creating the trigger declaration, write the code via `write_to_editor`.
+Field is `TRIGNAME` (not `NAME`). After creating the trigger slot, **you must set TDATE before writing code** — see warning below.
+
+**Critical: TDATE=01/01/88 sentinel makes triggers silently inert.** WebSDK `newRow` on FTRIG saves with `TDATE=01/01/88`. A trigger with this sentinel date never fires at runtime, even though `prepareForm` reports success. Always follow the `newRow`/`saveRow` with a TDATE update:
+
+```json
+{"form": "EFORM", "operations": [
+  {"op": "filter", "field": "ENAME", "value": "MY_FORM"},
+  {"op": "getRows"},
+  {"op": "setActiveRow", "row": 1},
+  {"op": "startSubForm", "name": "FTRIG"},
+  {"op": "filter", "field": "TRIGNAME", "value": "PRE-INSERT"},
+  {"op": "getRows"},
+  {"op": "setActiveRow", "row": 1},
+  {"op": "fieldUpdate", "field": "TDATE", "value": "30/04/26"},
+  {"op": "saveRow"}
+]}
+```
+
+Format is `DD/MM/YY`. ISO dates fail with `badDateFormat`. After setting TDATE, write the code via `write_to_editor`.
+
+*(seen in: TGML_CONST PRE-INSERT — verified 2026-04-29; column-level FORMCLTRIG rows are unaffected)*
 
 ### Add a direct activation
 
@@ -701,6 +788,81 @@ Field is `TRIGNAME` (not `NAME`). After creating the trigger declaration, write 
 ```
 
 Set `ETYPE` first ("P" for procedure, "F" for form, "R" for report), then `RUN`.
+
+### Add a custom error/warning message (FORMMSG)
+
+ERRMSG/WRNMSG numbers > 500 must exist in the form's FORMMSG subform before compile. Without the row, compile fails with `"דעה מספר <NUM> (מופיעה בהפעלה ...)"` — the form cannot be prepared.
+
+**FORMMSG is a sub-level of EFORM (not a standalone form).** Opening it directly returns "form not prepared". Always navigate via EFORM.
+
+```json
+{"form": "EFORM", "operations": [
+  {"op": "filter", "field": "ENAME", "value": "MY_FORM"},
+  {"op": "getRows"},
+  {"op": "setActiveRow", "row": 1},
+  {"op": "startSubForm", "name": "FORMMSG"},
+  {"op": "newRow"},
+  {"op": "fieldUpdate", "field": "NUM", "value": "502"},
+  {"op": "fieldUpdate", "field": "MESSAGE", "value": "Field must be one of A,B,C"},
+  {"op": "saveRow"}
+]}
+```
+
+- `NUM` ≥ 500 (system range 1–499 is reserved).
+- Add each message number before compiling any trigger that references it.
+- Wrong subform names (will silently fail): `FMSG`, `TRIGMSG`, `MESSAGES`, `FORMMESSAGES`.
+
+*(seen in: TGML_STATIONS OPTIMLINK CHECK-FIELD ERRMSG 502 — verified 2026-04-30)*
+
+### Add a column-level CHOOSE-FIELD trigger
+
+CHOOSE-FIELD on a column provides a short pick-list when the user enters
+the field. The navigation path is identical to CHECK-FIELD, only the
+TRIGNAME differs.
+
+**Declare the trigger slot:**
+```json
+[{"op":"filter","field":"ENAME","value":"<FORM>"},
+ {"op":"getRows"},
+ {"op":"setActiveRow","row":1},
+ {"op":"startSubForm","name":"FCLMN"},
+ {"op":"filter","field":"NAME","value":"<COL>"},
+ {"op":"getRows"},
+ {"op":"setActiveRow","row":1},
+ {"op":"startSubForm","name":"FORMCLTRIG"},
+ {"op":"newRow"},
+ {"op":"fieldUpdate","field":"TRIGNAME","value":"CHOOSE-FIELD"},
+ {"op":"saveRow"}]
+```
+
+**Write body lines (one newRow+fieldUpdate+saveRow per line):**
+```json
+[{"op":"startSubForm","name":"FORMCLTRIGTEXT"},
+ {"op":"newRow"},
+ {"op":"fieldUpdate","field":"TEXT","value":"SELECT VAL, CODE FROM MYTABLE WHERE CODE > 0"},
+ {"op":"saveRow"}]
+```
+
+**Three caveats specific to CHOOSE-FIELD:**
+
+(a) **Each FORMCLTRIGTEXT `saveRow` produces a non-blocking warning**
+    `"שאילתת CHOOSE חייבת לכלול תנאי WHERE"` until the full body is
+    in place and includes a WHERE clause. This is expected — ignore it
+    during incremental writes. Do not add `warningConfirm` ops.
+
+(b) **Column-level triggers do NOT need TDATE bumping.** The TDATE
+    sentinel bug (`TDATE=01/01/88`) only affects form-level FTRIG rows.
+    FORMCLTRIG saves with a real TDATE automatically. See
+    `references/triggers.md` §7 for the full TDATE diagnosis.
+
+(c) **Navigate to the correct column first.** Use `filter NAME + getRows
+    + setActiveRow` on FCLMN before `startSubForm FORMCLTRIG`, otherwise
+    the trigger slot lands on whichever column is currently active.
+
+*(seen in: TGML_PATHCFG BASEPATH CHOOSE-FIELD — verified end-to-end
+task 1.2, 2026-05-01)*
+
+---
 
 ### Compile a form
 

@@ -418,6 +418,58 @@ Requirements: tabula privilege group + `PRIVUSERS` = 1.
 
 ---
 
+## Singleton Constants Pattern
+
+When a project needs a small set of named scalar constants (rate caps, time windows, feature toggles), do **not** create a wide-row singleton table with one row and many typed columns. Priority ships two row-per-constant tables for exactly this purpose. The `ALLCONST` menu (תחזוקת מערכת > קבועי המערכת) wraps both.
+
+| Table | Type | NAME width | VALUE type/width | Use for |
+|---|---|---|---|---|
+| `SYSCONST` | system-only | CHAR(16) | INT(8) | Priority's own internal constants (DECIMAL, PRIVUSERS, UPGTITLES, …). **Do not insert into this.** |
+| `CUSTOMCONST` | customer extension | CHAR(20) | REAL(8) | Project-defined numeric constants. Customer-prefix the NAME (e.g. `TGML_T_DELIV2END`, `ACME_MAX_DEPTH`). |
+
+**Reading in SQLI:**
+```sql
+SELECT VALUE INTO :T FROM CUSTOMCONST
+ WHERE NAME = 'TGML_T_DELIV2END';
+```
+
+**Writing in SQLI** (changing a value at runtime):
+```sql
+UPDATE CUSTOMCONST SET VALUE = 7
+ WHERE NAME = 'TGML_T_DELIV2END';
+```
+
+**Seeding constants** — preferred path is the `CUSTOMCONST` form (ALLCONST > pos=60 in the menu). For programmatic seed in an upgrade, INSERT via the form interface, not raw SQL, so any business triggers fire:
+```sql
+INSERT INTO CUSTOMCONST (NAME, DES, VALUE)
+ VALUES ('TGML_T_DELIV2END', 'Delivery cutoff hour', 17);
+```
+
+**Width caveat:** the customer-prefix scheme assumes `NAME` ≤ 20 chars total. Long prefixes leave little room — abbreviate.
+
+### When CUSTOMCONST is not the right answer
+
+`CUSTOMCONST.VALUE` is `REAL(8)` only. For non-numeric singletons you need a dedicated table. Use the wide-row pattern with a `DUMMY=1` lock and a `PRE-INSERT` trigger that blocks any second row:
+
+```sql
+CREATE TABLE TGML_PROJECT_CONFIG 0
+DUMMY      (INT,  1, 'Lock')
+EMAIL_FROM (CHAR, 80, 'Sender Email')
+SFTP_HOST  (CHAR, 60, 'SFTP Host')
+START_DATE (DATE, 4,  'Project Start')
+UNIQUE (DUMMY);
+```
+Then on the form, attach a PRE-INSERT trigger:
+```sql
+SELECT 1 INTO :EXISTS FROM TGML_PROJECT_CONFIG WHERE DUMMY = 1;
+ERRMSG 500 WHERE :EXISTS = 1;        /* "Configuration already exists" */
+:$.DUMMY = 1;                         /* force the row to slot 1 */
+```
+
+**Live evidence (lp1378 demo, 2026-04-30):** 47 SQLI references to `CUSTOMCONST` across the codebase (18 form triggers + 29 procedure steps). System-shipped: `SYSCONST` EXEC=1313 (low id), `CUSTOMCONST` EXEC=36782, `ALLCONST` menu EXEC=6574.
+
+---
+
 ## DBI Syntax Reference
 
 The **Database Interpreter (DBI)** program is a database language for constructing and modifying database tables.

@@ -1,3 +1,11 @@
 # Append-only log of rejected findings with reasons.
 # Format: <ISO8601>	<candidate-id>	<classification>	<pattern_name>	<reason>
 2026-04-23T00:00:00Z	d4g6c8d0-de12-6f34-e5d6-7f8g9a01d204	missing	SYSPATH('LOAD') load-file directory token	already-documented: SYSPATH('LOAD') appears in plugin/skills/priority-sdk/sql-patterns.sql:601 and advanced-programming.md:742
+[2026-04-30] b2e4f5a6-8c9d-4e0f-c1b2-3d4e5f670b02 — UPLOAD built-in step with :$.FFL variable
+  reason: Frequency gate fail — only 1 entity (LOADORDERS) uses this pattern; deferred by prior gap-scan 2026-04-23 with same finding.
+  source: LOADORDERS
+---
+[2026-04-30] 6f7a8b9c-0d1e-2f3a-4b5c-6d7e8f901323 — IDJOINE collision on heavily-joined system forms
+  reason: Already documented — references/forms.md §304-305 covers row-multiplication anti-pattern and IDJOIN>=6 fix. Refinement (probe max IDJOIN first) has only 1 source.
+  source: PART form regression — TGML_PURFAM FK column with IDJOINE=6
+---

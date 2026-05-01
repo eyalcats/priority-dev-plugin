@@ -250,6 +250,26 @@ Define parameters in the **Procedure Parameters** form (sub-level of Procedure S
 - Follow the same naming rules as procedures but no prefix is required
 - The title is displayed to the user for input parameters, or stored as a brief message for PRINT/PRINTCONT/PRINTERR
 
+#### Intrinsic parameters vs PROGPARAM-named parameters
+
+Two distinct kinds of procedure parameters exist:
+
+| Kind | How declared | Name constraint | When to use |
+|------|-------------|-----------------|-------------|
+| **Intrinsic** | None — always available | `:PAR1` .. `:PAR8` | Passing values between steps; no user-facing label needed |
+| **PROGPARAM-named** | Row in PROGPARAM subform | CHAR(3) max (e.g. `:FDT`, `:TDT`, `:CUS`) | User-visible labeled input; presented in the parameter input screen |
+
+**Default for simple 2-parameter procedures**: use `:PAR1` / `:PAR2` — no
+PROGPARAM row needed. The name limit only matters when you want a labeled UI
+input row with a custom title.
+
+**CHAR(3) enforcement**: `PROGPARAM.NAME` is physically `CHAR(3)`. Names of
+4+ characters are silently truncated or rejected at save time, causing
+compile failures when the trigger references the full name. Verified
+via `displayTableColumns PROGPARAM` — 2026-05-01.
+
+*(seen in: PROGPARAM table schema verification — 2026-05-01)*
+
 ### Parameter Order
 
 Determine order by the **position** column (an integer). Not required for single-parameter steps or report steps.
@@ -639,6 +659,27 @@ Include a procedure as part of another via the **Procedure Link** form (sub-leve
 A direct activation is a procedure invoked as an Action from a form. The form's FORMEXEC subform holds the link; the target procedure runs against the form's current row.
 
 For how to add a direct activation via the FORMEXEC subform and for the UPGCODE that deploys it (`TAKEDIRECTACT`), see `deployment.md` § "FORMEXEC subform for direct activations".
+
+### Procedure step body — internal storage in PROGRAMSTEXT
+
+Each SQLI step in a procedure is its own `EXEC` row with `TYPE='P'`. The parent procedure's PROGPROG subform lists the child step procs by ENAME. The SQLI body lives in `PROGRAMSTEXT` keyed by the step's `PROG` value (which equals the step's EXEC id):
+
+```
+PROGRAMSTEXT(PROG INT 8, TEXTLINE INT 8, TEXTORD INT 8, TEXT CHAR 68)
+```
+
+- `PROG` — the EXEC id of the step entity (not the parent procedure).
+- `TEXTLINE` — line number (1-based).
+- `TEXTORD` — intra-line ordering (always 1 for standard SQLI).
+- `TEXT` — up to 68 characters per line (same cap as form trigger lines).
+
+**For single-step procedures**, the parent PROG owns PROGRAMSTEXT directly — no PROGPROG rows are needed.
+
+**write_to_editor with `stepName='<pos>_SQLI'`** updates an existing step's PROGRAMSTEXT. It fails with "key not found" if the step entity does not exist yet — create the step slot first via EPROG > PROGPROG (or `priority.createProcedureStep` WINDBI scaffold) before writing.
+
+**A procedure with zero steps** fails `prepareProc` with "לפרוצדורה X אין אף שלב" ("procedure X has no steps").
+
+*(seen in: TGML live-build procedure authoring — 2026-04-30)*
 
 ### The procedure receives `:$.PAR`, not `:$.COL`
 

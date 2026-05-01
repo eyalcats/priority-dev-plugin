@@ -356,6 +356,28 @@ Perform verification checks before a new record is inserted.
 WRNMSG 1 WHERE :$.ACCOUNT = 0;
 ```
 
+### Singleton-table PRE-INSERT guard
+
+A singleton table (one row enforced) requires a PRE-INSERT ERRMSG that
+rejects a second row. The naive pattern self-blocks the FIRST row:
+
+```sql
+/* WRONG — self-blocks row #1 because Priority makes the in-progress
+   row visible to its own EXISTS subquery: */
+ERRMSG 500 WHERE EXISTS (SELECT 1 FROM TGML_PATHCFG);
+
+/* RIGHT — exclude the in-progress row by its identity column value,
+   and also reject an invalid identity value: */
+ERRMSG 500 WHERE EXISTS (SELECT 1 FROM TGML_PATHCFG WHERE DUMMY = 1);
+ERRMSG 501 WHERE :$.DUMMY <> 1;
+```
+
+The two-clause form: the first allows the seed row to pass (no existing row
+with DUMMY=1 yet); the second rejects any future row with DUMMY <> 1. After
+the seed, both clauses together prevent a second row permanently.
+
+*(seen in: TGML_PATHCFG PRE-INSERT — verified 2026-05-01)*
+
 ### POST-INSERT
 
 Perform operations after a record is successfully inserted.
@@ -801,6 +823,46 @@ View triggers that include the current trigger in the **Use of Trigger** sub-lev
 ---
 
 ## 7. Trigger Errors
+
+### FORMTRIG.TDATE sentinel — silent inert trigger bug
+
+When a form-level trigger slot is created via WebSDK `newRow` on the FTRIG subform, Priority saves it with `TDATE = 01/01/88` (the epoch sentinel meaning "not yet set"). **A trigger with TDATE = 01/01/88 is silently inert at runtime: the code in FORMTRIGTEXT is present and `prepareForm` reports success, but the trigger never fires.**
+
+**Diagnostic:**
+```sql
+SELECT TRIG, TDATE FROM FORMTRIG
+WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = '<FORM>' AND TYPE = 'F')
+FORMAT;
+```
+If any row shows `TDATE = 01/01/88`, that trigger is inert.
+
+**Fix — before writing code or compiling, update TDATE on the slot:**
+```json
+{"form": "EFORM", "operations": [
+  {"op": "filter", "field": "ENAME", "value": "<FORM>"},
+  {"op": "getRows"},
+  {"op": "setActiveRow", "row": 1},
+  {"op": "startSubForm", "name": "FTRIG"},
+  {"op": "filter", "field": "TRIGNAME", "value": "<TRIG_NAME>"},
+  {"op": "getRows"},
+  {"op": "setActiveRow", "row": 1},
+  {"op": "fieldUpdate", "field": "TDATE", "value": "<DD/MM/YY>"},
+  {"op": "saveRow"}
+]}
+```
+Date format must be `DD/MM/YY`. ISO `YYYY-MM-DD` fails with `badDateFormat`.
+
+Column-level triggers (`FORMCLTRIG`) are unaffected — only form-level (`FORMTRIG`) rows exhibit this bug.
+
+**Workflow for new form-level triggers (canonical order):**
+1. `FTRIG newRow` → set TRIGNAME + TYPE → `saveRow`
+2. `FTRIG filter(TRIGNAME)` → `getRows` → `setActiveRow(1)` → `fieldUpdate(TDATE, "<today>")` → `saveRow`
+3. `write_to_editor(...)` with the SQLI body
+4. `compile`
+
+*(seen in: TGML_CONST PRE-INSERT via WebSDK FTRIG newRow — verified 2026-04-29)*
+
+---
 
 Form preparation fails on major trigger errors:
 - SQL syntax errors

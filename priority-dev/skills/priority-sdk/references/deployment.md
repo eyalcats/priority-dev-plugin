@@ -139,6 +139,38 @@ When programmatic WebSDK is too slow for bulk UPGNOTES population, direct SQL on
 - **Revisions where `TRANSLATED='Y'` already** — TAKEUPGRADE silently no-ops.
 - **Revisions with no UPGNOTES entries** — TAKEUPGRADE runs but produces an empty shell.
 
+## Decommission recipe — custom form + table
+
+When removing a custom form and its backing table, execute the following
+steps in order. Each step removes a dependent that blocks the next:
+
+1. **Remove EMENU rows**: Delete menu links via EFORM or direct SQL
+   (`DELETE FROM EMENU WHERE EXEC = <form_exec> AND TYPE = 'F'`).
+   Skipping this produces: `ערך קיים במסך 'מופעל מתפריט/מסך'` on EFORM deleteRow.
+
+2. **Empty trigger code, then delete FTRIG rows**: For each trigger slot,
+   call `write_to_editor(content='')` then `EFORM > FTRIG > deleteRow`.
+   An empty FORMTRIGTEXT is required before the FTRIG slot can be deleted.
+   Skipping this produces: `ערך קיים במסך 'הפעלות המסך - שאילתות SQL'`.
+
+3. **Delete FORMMSG rows**: `EFORM > FORMMSG > deleteRow` for each custom
+   message (NUM >= 500).
+
+4. **Delete FCLMN rows**: `EFORM > FCLMN > setActiveRow(1) + deleteRow`
+   in a loop until empty.
+   Skipping this produces: `ערך קיים במסך 'עמודות המסך'`.
+
+5. **Delete the EFORM row**: `EFORM > deleteRow` on the parent.
+
+6. **DBI DROP TABLE**: `run_inline_sqli(mode="dbi", sql="DELETE TABLE <NAME>;")`.
+
+The Hebrew error messages serve as diagnostic signals — each names the
+blocking subform. Peel in reverse order.
+
+*(seen in: TGML_CONST — verified 2026-04-30, 17 ops: 1 menu + 1 trigger +
+1 message + 12 columns + 1 form + 1 DBI. Applicable to all 124+ custom forms
+with triggers in this environment.)*
+
 ## Related references
 
 - `debugging.md` § "Revisions and Customizations" — revision lifecycle, Language Dictionaries, INSTITLE behaviour, legacy troubleshooting matrices.
