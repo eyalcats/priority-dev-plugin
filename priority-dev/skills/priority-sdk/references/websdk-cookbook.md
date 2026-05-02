@@ -1219,3 +1219,84 @@ FORMAT;
 ### Tables that DO NOT EXIST (common wrong guesses)
 
 `FORMCOLUMNS`, `FORMCOL`, `FORMCOLUMN`, `SYSCOLUMNS`, `SYSTEMCOLUMN`, `SYSTABLES`, `TABLES`, `FORMLINK`, `SUBFORMS` — none of these are valid Priority table names.
+
+---
+
+## Procedure creation gotchas
+
+### WebSDK `newRow` on EPROG produces procedures that silently never execute
+
+**Creating a procedure entirely via WebSDK `newRow` on `EPROG` is unreliable.** The resulting procedure may appear correctly formed — EXEC row exists, PROGPROG steps are present, PROGRAMSTEXT body rows have correct content — but the body silently never executes. Even a bare `ERRMSG 1 WHERE 1=1;` as the first body line produces no output.
+
+**Root cause:** suspected missing internal initialization step that the Priority web UI duplicate path completes, but the WebSDK `newRow` path skips.
+
+**Reliable procedure creation path:**
+1. In the Priority web UI, open the Procedure Generator (`EPROG`).
+2. Create a minimal template procedure manually (one SQLI step with a placeholder body), or duplicate (`שכפול`) an existing procedure of the same type.
+3. Use `write_to_editor` to overwrite the step body with the real code.
+4. Compile via `run_windbi_command("priority.prepareProc")`.
+
+**Diagnosing a procedure that never executes:**
+1. Add `ERRMSG 1 WHERE 1=1;` as the very first line of the body.
+2. Run the procedure from the Priority web UI (not via bridge tools — `run_inline_sqli` suppresses ERRMSG output).
+3. If no error dialog appears, the procedure container itself is corrupt — delete and recreate via the UI duplicate path.
+
+*(seen in: session-2026-05-02-tgml-phase1 — TGML_INITSERIES created via newRow on EPROG; identical metadata to working procedures; body never executed)*
+
+---
+
+## Entity deletion
+
+### Procedure deletion requires child-first ordering
+
+Priority enforces referential integrity: you cannot delete a parent row while child rows exist. Deletion must go deepest-child-first.
+
+**Symptom of wrong order:** `"ערך קיים ב..."` ("Value exists in ... screen") error on `deleteRow` — means a child subform still has rows.
+
+**Child-first deletion order for procedures:**
+
+```
+For each step in the procedure:
+  1. Delete all PROGRAMSTEXT rows (step body lines)
+     run_inline_sqli: DELETE FROM PROGRAMSTEXT WHERE PROG = <step_exec_id>
+  2. Delete all PROGPARAM rows (parameters)
+     run_inline_sqli: DELETE FROM PROGPARAM WHERE PROG = <step_exec_id>
+  3. Delete the PROGPROG link row from parent
+     WebSDK: EPROG > filter(ENAME=parent) > startSubForm(PROGPROG) >
+             filter(ENAME=step) > setActiveRow(1) > deleteRow
+  4. Delete the child step EXEC via EPROG
+     WebSDK: filter(ENAME=step_name) > setActiveRow(1) > deleteRow
+
+Then delete the parent procedure:
+  5. WebSDK: filter(ENAME=parent_name) > setActiveRow(1) > deleteRow
+```
+
+Same pattern for forms: delete FORMCLTRIGTEXT, FORMCLTRIG, FORMTRIGTEXT, FTRIG, FCLMNA, FCLMN rows before `deleteRow` on the EFORM root row.
+
+*(seen in: session-2026-05-02-tgml-phase1 — deleteRow on EPROG for TGML_DISPATCH failed with "ערך קיים במסך 'שלבי הפרוצדורה'" until child rows cleared in order)*
+
+### PROGMENU must be cleared before deleting a procedure with direct activations (step 0)
+
+If the procedure is registered as a direct activation from any form or menu, EPROG's **PROGMENU** subform holds a row pointing to that linkage. Attempting to delete the EPROG parent while PROGMENU rows exist raises:
+
+```
+ערך קיים במסך 'מופעל מתפריט/מסך'
+("Value exists in 'Activated from menu/screen'")
+```
+
+**Extended child-first deletion order for procedures that have direct activations:**
+
+```
+0. (new) Clear PROGMENU rows first:
+   EPROG > filter(ENAME=proc) > setActiveRow(1)
+     > startSubForm('PROGMENU') > setActiveRow(1) > deleteRow > endSubForm
+1. Delete PROGRAMSTEXT rows (step body lines) for each step
+2. Delete PROGPARAM rows (parameters) for each step
+3. Delete PROGPROG link rows from parent
+4. Delete child step EXEC rows via EPROG
+5. Delete parent EPROG row
+```
+
+Check for PROGMENU rows before attempting deletion of any procedure that may have been activated from a form or menu — this is step 0, not an afterthought.
+
+*(seen in: session-2026-05-02-tgml-phase1 — TGML_DISPATCH had a PROGMENU entry from TGML_PRODSERIES; deleteRow failed until PROGMENU cleared)*

@@ -1008,6 +1008,8 @@ SELECT DAY(03/22/06) FROM DUMMY FORMAT; /* 4 */
 ```
 Use the `DAYS` table (English) or `LANGDAYS` table (other languages) to get weekday names.
 
+> **Note:** `DAYOFWEEK(date)` does NOT exist in Priority SQLI and produces a parse error. Use `DAY(date)` instead (returns Sun=1 ... Sat=7).
+
 ##### MDAY(date)
 Return the day number in the month.
 ```sql

@@ -286,6 +286,20 @@ New system tables cannot be created. Columns cannot be added to system tables.
 
 Column type changes are not permitted, **except**: during the development phase, convert INT to REAL and vice versa using the `Change Number Type` program.
 
+### INT(N) width — max value semantics
+
+**`INT(N)` means the column can store a maximum value of 10^N − 1 (N nines), NOT an N-byte integer.**
+
+| DBI declaration | Max storable value | Typical use |
+|----------------|-------------------|-------------|
+| `INT,3` | 999 | Week number, small counters |
+| `INT,8` | 99,999,999 | Date internals |
+| `INT,13` | 9,999,999,999,999 | Primary keys, large IDs |
+
+Inserting a value that exceeds this limit raises SQL Server error 8114 ("Error converting data type varchar to bigint") — the error message is misleading and does not mention the overflow cause directly.
+
+**Rule:** When sizing an INT column, ask "what is the largest value I will ever store?" then choose N = number of digits in that value. A week-number column that will reach 9001 needs `INT,4` (max 9999), not `INT,3` (max 999). *(seen in: session-2026-05-02-tgml-phase1 — TGML_PRODSERIES.WEEKNUM INT,3 overflowed at value 9001 with SQL Server error 8114)*
+
 ### Decimal Precision
 
 - Optional; used for real numbers and shifted integers.

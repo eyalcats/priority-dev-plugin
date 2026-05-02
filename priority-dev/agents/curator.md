@@ -206,9 +206,12 @@ Activate when the invoker's prompt JSON includes `"mode": "gap-curator"`. Your j
   "pendingPath": "plugin/skills/priority-sdk/_pending.yaml",
   "rejectedLogPath": "plugin/skills/priority-sdk/_rejected.log",
   "reportDir": "docs/solutions/harvests/",
-  "skillRoot": "plugin/skills/priority-sdk/"
+  "skillRoot": "plugin/skills/priority-sdk/",
+  "verdicts": [ /* optional — array of verdict envelopes from eval-investigator agents */ ]
 }
 ```
+
+When `verdicts` is provided, every verdict's `candidate_id` MUST exist in the queue. Verdicts whose `candidate_id` does not match any queued candidate are warnings (logged in the report) but do not abort.
 
 ### Phase 1 — Read the queue
 
@@ -218,13 +221,26 @@ Use `Read` on `_pending.yaml`. If `candidates: []`, return `{ "accepted": 0, "re
 
 Group candidates by `pattern_signature`. Within each group, collapse into one finding with a `cited_sources` array (the union of `source_ref` values from each member). Preserve the earliest `added_at` as the finding's timestamp.
 
-### Phase 3 — Admission gate
+### Phase 3 — Admission gate (verdict-aware)
 
-- `missing`: admit on ≥ 1 cited source.
-- `new-category`: admit on ≥ 1 cited source.
-- `partial`: admit only if ≥ 2 cited sources.
+For each candidate in the queue (after Phase 2 dedupe), check for an eval verdict in the input `verdicts` array:
 
-Non-admitted `partial` findings stay in the queue — don't remove them. They may get corroborated by future runs.
+| Source | classification | gate |
+|---|---|---|
+| eval `verified` | any | **admit** (bypass source-count gate) |
+| eval `disproven` | any | **auto-reject** — write to `_rejected.log`, remove from `_pending.yaml` |
+| eval `inconclusive` | any | fall through to source-count gate (likely stays deferred) |
+| no eval | partial | ≥ 2 cited sources required |
+| no eval | missing | ≥ 1 cited source |
+| no eval | new-category | ≥ 1 cited source |
+
+Auto-rejection log entry format:
+
+```
+<ISO timestamp>\t<id>\tauto-eval\t<pattern_name>\tdisproven: <verdict_subtype> — <evidence.summary truncated to 200 chars>
+```
+
+Non-admitted, non-auto-rejected findings stay in the queue.
 
 ### Phase 4 — Write the gap-analysis report
 
@@ -257,6 +273,37 @@ skill_sha_at_run: <from `git rev-parse HEAD`>
 
 (repeat per finding, grouped by target file)
 
+## Eval results
+
+Run timestamp: <ISO>
+Counts: evaluated=<N> verified=<n> disproven=<n> inconclusive=<n> orphans=<n>
+
+<If any verdict has non-empty sandbox.orphans:>
+### ⚠ Orphans — manual cleanup required
+
+| Sandbox prefix | Orphan entity | Candidate id |
+|---|---|---|
+| ... | ... | ... |
+
+### Verified (auto-admitted)
+
+- **<pattern_name>** (id: <id>) — <verdict_subtype>
+  - Probe: <probe_class>; commands run: <count>; duration: <s>s
+  - <evidence.summary>
+
+### Disproven (auto-rejected)
+
+- **<pattern_name>** (id: <id>) — <verdict_subtype>
+  - <evidence.summary>
+  - Logged in `_rejected.log` as `auto-eval`.
+
+### Inconclusive (still deferred)
+
+- **<pattern_name>** (id: <id>) — <verdict_subtype>
+  - <evidence.summary>
+
+*If `verdicts` is empty or absent, omit the entire `## Eval results` section from the rendered report.*
+
 ## Deferred findings
 - Non-admitted `partial` findings remain in `_pending.yaml` awaiting corroboration.
 - List them here with: id, pattern_name, current cited_sources count, reason (e.g., "partial, 1 source — need ≥2").
@@ -274,19 +321,39 @@ Return the report inline to the caller along with a machine-readable manifest:
 {
   "reportPath": "<path>",
   "admitted": [
-    { "id": "<uuid>", "pattern_name": "<name>", "target": "<path>", "classification": "<cls>" },
-    ...
+    { "id": "<uuid>", "pattern_name": "<name>", "target": "<path>", "classification": "<cls>",
+      "admitted_via": "source-count" | "eval-verified" }
+  ],
+  "auto_rejected": [
+    { "id": "<uuid>", "pattern_name": "<name>", "verdict_subtype": "<subtype>" }
   ],
   "deferred": [ ... ],
-  "totals": { "admitted": <n>, "deferred": <n>, "partial_awaiting_corroboration": <n> }
+  "totals": { "admitted": <n>, "auto_rejected": <n>, "deferred": <n>,
+              "partial_awaiting_corroboration": <n>, "orphans": <n> },
+  "requires_orphan_ack": true | false
 }
 ```
+
+`requires_orphan_ack` is `true` when any verdict contains a non-empty `sandbox.orphans`. The orchestrator must surface this to the user as a separate confirmation step before proceeding to apply mode. The curator does not validate the ack — when the apply prompt arrives, the curator assumes the orchestrator has already gated it.
 
 STOP HERE. Do not apply edits. Do not remove from `_pending.yaml`. Do not commit. The orchestrator prompts the user for approval.
 
 ### Phase 6 — Apply approved findings (only after orchestrator sends approval)
 
 When the orchestrator sends a follow-up prompt `{ "mode": "gap-curator-apply", "approved_ids": [...], "rejected_ids": [...], "rejection_reasons": {...} }`:
+
+First, drain auto-rejections from this run (no human approval required — these were eval-disproven):
+
+For each entry in the report's "Disproven (auto-rejected)" section:
+1. Append to `_rejected.log`: `<ISO timestamp>\t<id>\tauto-eval\t<pattern_name>\tdisproven: <verdict_subtype> — <evidence.summary truncated to 200 chars>`
+2. Remove the candidate from `_pending.yaml` via the `removeCandidate` helper.
+3. Commit:
+   ```bash
+   git add plugin/skills/priority-sdk/_pending.yaml plugin/skills/priority-sdk/_rejected.log
+   git commit -m "review-pending: auto-reject <pattern_name> — eval disproved"
+   ```
+
+Then proceed with the human-approved findings as previously specified.
 
 For each `approved_id`:
 1. Read the finding from the report (or re-read `_pending.yaml`).

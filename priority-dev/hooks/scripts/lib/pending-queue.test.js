@@ -100,3 +100,138 @@ test("readQueue on nonexistent file returns []", () => {
   const p = path.join(os.tmpdir(), `pq-nonexistent-${Date.now()}.yaml`);
   assert.deepEqual(readQueue(p), []);
 });
+
+const { partitionForEval, deriveSandboxPrefix, validateVerdict, applyVerdicts } = require("./pending-queue");
+
+test("partitionForEval splits queue by deferral rule", () => {
+  const p = tmpFile("candidates: []\n");
+  // partial w/ 1 source → deferred
+  appendCandidate(p, { source_mode: "continuous", source_ref: "S1", classification: "partial",
+    pattern_name: "P1", pattern_signature: "p1", evidence: {}, proposed_edit: {}, notes: "" });
+  // partial w/ 2 distinct sources → admit-eligible
+  const id2 = appendCandidate(p, { source_mode: "continuous", source_ref: "S1", classification: "partial",
+    pattern_name: "P2", pattern_signature: "p2", evidence: {}, proposed_edit: {}, notes: "" });
+  appendCandidate(p, { source_mode: "continuous", source_ref: "S2", classification: "partial",
+    pattern_name: "P2", pattern_signature: "p2", evidence: {}, proposed_edit: {}, notes: "" });
+  // missing → admit-eligible regardless of count
+  appendCandidate(p, { source_mode: "continuous", source_ref: "S1", classification: "missing",
+    pattern_name: "P3", pattern_signature: "p3", evidence: {}, proposed_edit: {}, notes: "" });
+
+  const queue = readQueue(p);
+  const { admitEligible, deferred } = partitionForEval(queue);
+
+  assert.equal(deferred.length, 1, "one partial w/ <2 sources should be deferred");
+  assert.equal(deferred[0].pattern_signature, "p1");
+  assert.equal(admitEligible.length, 3, "P2 group + P3 missing should be admit-eligible");
+});
+
+test("deriveSandboxPrefix uses last 8 hex chars of UUID", () => {
+  assert.equal(
+    deriveSandboxPrefix("a1b2c3d4-e5f6-7890-abcd-ef1234567801"),
+    "EVAL_34567801"
+  );
+  assert.equal(
+    deriveSandboxPrefix("f13a9b2c-d4e5-6f78-90ab-cdef12345613"),
+    "EVAL_12345613"
+  );
+});
+
+test("deriveSandboxPrefix rejects non-uuid input", () => {
+  assert.throws(() => deriveSandboxPrefix("not-a-uuid"), /invalid uuid/i);
+  assert.throws(() => deriveSandboxPrefix(""), /invalid uuid/i);
+  assert.throws(() => deriveSandboxPrefix(null), /invalid uuid/i);
+});
+
+test("validateVerdict accepts a well-formed verified envelope", () => {
+  const v = {
+    candidate_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567801",
+    pattern_signature: "sig",
+    verdict: "verified",
+    verdict_subtype: "live-probe-confirmed",
+    probe_class: "read-only",
+    evidence: { commands_run: [], skill_files_checked: [], summary: "ok" },
+    sandbox: { prefix: "EVAL_34567801", entities_created: [], entities_cleaned: [], orphans: [] },
+    duration_seconds: 5
+  };
+  const r = validateVerdict(v);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+test("validateVerdict rejects bad verdict value", () => {
+  const v = { candidate_id: "id", pattern_signature: "s", verdict: "approved",
+    verdict_subtype: "x", probe_class: "read-only",
+    evidence: { commands_run: [], skill_files_checked: [], summary: "" },
+    sandbox: { prefix: "p", entities_created: [], entities_cleaned: [], orphans: [] },
+    duration_seconds: 0 };
+  const r = validateVerdict(v);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some(e => e.includes("verdict")), "should error on verdict field");
+});
+
+test("validateVerdict rejects orphan reported with verified verdict + no ack flag", () => {
+  // Verified with orphans is suspicious — caller (curator) requires explicit handling.
+  // The validator flags this as a structural warning, not an error.
+  const v = {
+    candidate_id: "id", pattern_signature: "s", verdict: "verified", verdict_subtype: "live-probe-confirmed",
+    probe_class: "sandbox-write",
+    evidence: { commands_run: [], skill_files_checked: [], summary: "" },
+    sandbox: { prefix: "EVAL_x", entities_created: ["EVAL_x_PROC"], entities_cleaned: [],
+               orphans: ["EVAL_x_PROC"] },
+    duration_seconds: 1
+  };
+  const r = validateVerdict(v);
+  assert.equal(r.ok, true, "structural validation passes");
+  assert.ok(r.warnings && r.warnings.some(w => w.includes("orphan")), "should warn about orphans");
+});
+
+test("applyVerdicts produces three buckets", () => {
+  const candidates = [
+    { id: "id-v", classification: "partial", pattern_name: "V" },
+    { id: "id-d", classification: "partial", pattern_name: "D" },
+    { id: "id-i", classification: "partial", pattern_name: "I" },
+    { id: "id-x", classification: "partial", pattern_name: "X" }, // no verdict
+  ];
+  const verdicts = [
+    { candidate_id: "id-v", verdict: "verified", evidence: { summary: "ok" } },
+    { candidate_id: "id-d", verdict: "disproven", verdict_subtype: "live-probe-contradicted",
+      evidence: { summary: "no, that's wrong" } },
+    { candidate_id: "id-i", verdict: "inconclusive", verdict_subtype: "timeout",
+      evidence: { summary: "took too long" } },
+  ];
+  const r = applyVerdicts(candidates, verdicts);
+  assert.equal(r.admitted.length, 1);
+  assert.equal(r.admitted[0].id, "id-v");
+  assert.equal(r.autoRejected.length, 1);
+  assert.equal(r.autoRejected[0].id, "id-d");
+  assert.equal(r.stillDeferred.length, 2, "id-i (inconclusive) + id-x (no verdict) stay deferred");
+  assert.deepEqual(r.stillDeferred.map(c => c.id).sort(), ["id-i", "id-x"]);
+});
+
+test("partitionForEval defers a mixed-classification group when partial source-count is insufficient", () => {
+  // A pattern_signature appears twice — once as `missing`, once as `partial`,
+  // with the same source_ref. The partial keeps the whole group behind the gate
+  // until ≥2 distinct sources accumulate. Must be order-independent.
+  const candidates1 = [
+    { id: "a", source_ref: "S1", classification: "partial",  pattern_signature: "shared" },
+    { id: "b", source_ref: "S1", classification: "missing",  pattern_signature: "shared" },
+  ];
+  const candidates2 = [
+    { id: "b", source_ref: "S1", classification: "missing",  pattern_signature: "shared" },
+    { id: "a", source_ref: "S1", classification: "partial",  pattern_signature: "shared" },
+  ];
+  const r1 = partitionForEval(candidates1);
+  const r2 = partitionForEval(candidates2);
+  assert.equal(r1.deferred.length, 2, "partial in group → all deferred (order 1)");
+  assert.equal(r2.deferred.length, 2, "partial in group → all deferred (order 2)");
+  assert.equal(r1.admitEligible.length, 0);
+  assert.equal(r2.admitEligible.length, 0);
+});
+
+test("validateVerdict returns warnings:[] on non-object input so downstream destructuring is safe", () => {
+  for (const bad of [null, undefined, "string", 42, true]) {
+    const r = validateVerdict(bad);
+    assert.equal(r.ok, false, `bad input ${JSON.stringify(bad)} should fail`);
+    assert.ok(Array.isArray(r.warnings), `warnings must be an array for input ${JSON.stringify(bad)}`);
+    assert.equal(r.warnings.length, 0);
+  }
+});

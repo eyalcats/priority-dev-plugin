@@ -177,6 +177,22 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Split into single-event triggers (POST-INSERT + POST-UPDATE, share logic via INCLUDE), or invoke a helper procedure from the combined slot.
 - **See:** `triggers.md` § "Cursors cannot run in combined triggers" (SDK 23.1 release-notes gotcha).
 
+### Embedding Hebrew character literals directly in SQLI procedure or trigger code on Hebrew installs
+- **Symptom:** Code looks correct in the editor but compiles wrong or produces incorrect results at runtime. Opening `PROGRAMSTEXT` or `FORMTRIGTEXT` for the saved step reveals the entire line has been stored reversed (RTL).
+- **Root cause:** `PROGRAMSTEXT.TEXT` and `FORMTRIGTEXT.TEXT` are `CHAR(68)` columns. On a Hebrew Priority installation the database client renders these columns RTL, causing any line that contains a Hebrew character literal to be stored with its characters in reversed order. The reversed line is syntactically invalid SQLI.
+  Example — intended source: `:SD = (:DN = 'א' ? 'A' : :SD);`
+  Stored in PROGRAMSTEXT: `;(A' : :SD' ? 'א' = SD = (:DN:`
+- **Wrong:** Writing Hebrew string constants inline: `':SD = (:DN = 'א' ...)'`.
+- **Right:** Use runtime functions or message numbers instead of inline Hebrew literals:
+  | Need | Safe alternative |
+  |------|----------------|
+  | Hebrew weekday letter | `DTOA(date, 'day')` at runtime |
+  | Day-of-week comparison | `DAY(date)` integer (1=Sun … 7=Sat) |
+  | Hebrew message text | `ENTMESSAGE(entity, type, num)` |
+  | Any Hebrew string constant | Define in Procedure Messages / Form Messages; reference by number |
+  Note: the `:HEBREWFILTER` variable controls display ordering only — it does NOT fix source-code storage reversal.
+- **See:** `sql-core.md` § "String Functions". *(seen in: session-2026-05-02-tgml-phase1)*
+
 ## Deployment
 
 ### Using `TAKESINGLEENT` for any change

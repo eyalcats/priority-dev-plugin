@@ -235,4 +235,68 @@ function mergeUserLocal(projectPath, userLocalPath) {
   });
 }
 
-module.exports = { readQueue, writeQueue, appendCandidate, removeCandidate, countByClassification, mergeUserLocal };
+function partitionForEval(candidates) {
+  const bySig = new Map();
+  for (const c of candidates) {
+    const arr = bySig.get(c.pattern_signature) || [];
+    arr.push(c);
+    bySig.set(c.pattern_signature, arr);
+  }
+  const admitEligible = [];
+  const deferred = [];
+  for (const [, group] of bySig) {
+    const distinctSources = new Set(group.map(c => c.source_ref)).size;
+    const hasPartial = group.some(c => c.classification === "partial");
+    const groupAdmitEligible = !hasPartial || distinctSources >= 2;
+    for (const c of group) {
+      if (groupAdmitEligible) admitEligible.push(c);
+      else deferred.push(c);
+    }
+  }
+  return { admitEligible, deferred };
+}
+
+function deriveSandboxPrefix(uuid) {
+  if (typeof uuid !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)) {
+    throw new Error("invalid uuid: " + uuid);
+  }
+  const hex = uuid.replace(/-/g, "");
+  return "EVAL_" + hex.slice(-8).toLowerCase();
+}
+
+function validateVerdict(v) {
+  const errors = [];
+  const warnings = [];
+  if (!v || typeof v !== "object") return { ok: false, errors: ["verdict must be an object"], warnings: [] };
+  for (const f of ["candidate_id", "pattern_signature", "verdict", "verdict_subtype", "probe_class", "evidence", "sandbox"]) {
+    if (!(f in v)) errors.push(`missing field: ${f}`);
+  }
+  if (!["verified", "disproven", "inconclusive"].includes(v.verdict))
+    errors.push(`bad verdict value: ${v.verdict}`);
+  if (!["read-only", "sandbox-write", "skill-cross-check-only"].includes(v.probe_class))
+    errors.push(`bad probe_class: ${v.probe_class}`);
+  if (v.evidence && (!Array.isArray(v.evidence.commands_run) || !Array.isArray(v.evidence.skill_files_checked)))
+    errors.push("evidence.commands_run and evidence.skill_files_checked must be arrays");
+  if (v.sandbox && !Array.isArray(v.sandbox.orphans))
+    errors.push("sandbox.orphans must be an array");
+  if (v.sandbox && Array.isArray(v.sandbox.orphans) && v.sandbox.orphans.length > 0)
+    warnings.push(`orphan entities reported: ${v.sandbox.orphans.join(", ")}`);
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+function applyVerdicts(candidates, verdicts) {
+  const byId = new Map(verdicts.map(v => [v.candidate_id, v]));
+  const admitted = [];
+  const autoRejected = [];
+  const stillDeferred = [];
+  for (const c of candidates) {
+    const v = byId.get(c.id);
+    if (!v) { stillDeferred.push(c); continue; }
+    if (v.verdict === "verified") admitted.push({ ...c, _verdict: v });
+    else if (v.verdict === "disproven") autoRejected.push({ ...c, _verdict: v });
+    else stillDeferred.push({ ...c, _verdict: v });
+  }
+  return { admitted, autoRejected, stillDeferred };
+}
+
+module.exports = { readQueue, writeQueue, appendCandidate, removeCandidate, countByClassification, mergeUserLocal, partitionForEval, deriveSandboxPrefix, validateVerdict, applyVerdicts };

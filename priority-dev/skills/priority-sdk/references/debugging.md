@@ -912,3 +912,55 @@ Queries exceeding the threshold are recorded in **List of Queries in Process** (
 ### Limitations
 
 - REST API activity is not currently captured by Heavy Query Monitoring.
+
+---
+
+## Diagnostic Techniques
+
+### Diagnosing silent procedure body failures
+
+When a procedure compiles without errors but produces no visible output or side effects, use these two complementary techniques to locate the failure line.
+
+**Technique 1 — ERRMSG litmus (confirms body entry)**
+
+Add as the very first line of the procedure step body:
+
+```sql
+ERRMSG 1 WHERE 1 = 1;
+```
+
+Run via the Priority web UI (not via bridge tools — `run_inline_sqli` suppresses ERRMSG output). If no error dialog appears, the body is not executing at all. Diagnose the procedure container itself (see `websdk-cookbook.md` § "Procedure creation gotchas").
+
+**Technique 2 — Marker INSERT (pinpoints the failing line)**
+
+Create a simple debug log table (one-time DBI):
+
+```sql
+/* DBI */
+CREATE TABLE XXXX_DEBUGLOG 'Debug Log' 0
+TAG  (CHAR,40,'Tag')
+TS   (DATE,14,'Timestamp')
+UNIQUE(TAG, TS);
+```
+
+Insert unique markers at suspected execution points in the procedure body:
+
+```sql
+INSERT INTO XXXX_DEBUGLOG(TAG,TS) VALUES('BODY_START', SQL.DATE);
+/* ... some logic ... */
+INSERT INTO XXXX_DEBUGLOG(TAG,TS) VALUES('AFTER_CURSOR_OPEN', SQL.DATE);
+/* ... more logic ... */
+INSERT INTO XXXX_DEBUGLOG(TAG,TS) VALUES('AFTER_LOOP', SQL.DATE);
+```
+
+After running, query the log:
+
+```sql
+SELECT TAG, DTOA(TS,'XX/XX/XX hh:mm') FROM XXXX_DEBUGLOG ORDER BY TS FORMAT;
+```
+
+The last marker present tells you exactly where execution stopped. Clean up after debugging: `DELETE FROM XXXX_DEBUGLOG WHERE TAG <> '';`
+
+**Advantage over ERRMSG:** works even when ERRMSG is suppressed by the execution context, and pinpoints the exact failing line rather than just confirming body entry. Particularly valuable for long procedure bodies and nested cursor loops.
+
+*(seen in: session-2026-05-02-tgml-phase1 — technique successfully traced a silent failure to line 7 of a 35-line procedure body, bypassing bridge tool unreliable output)*
