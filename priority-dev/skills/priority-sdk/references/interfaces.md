@@ -137,6 +137,50 @@ Specify the load table in the Form Load (EDI) form, in the **Load Table** column
 
 ### Mapping the Interface
 
+**GENERALLOAD column naming — no "F" prefix (silent NULL failure):**
+GENERALLOAD column names are `LINE`, `RECORDTYPE`, `INT1`–`INTn`, `REAL1`–`REALn`,
+`DATE1`–`DATEn`, `CHAR1`–`CHAR25`, `TEXT1`–`TEXT18`, `LOADED`, `KEY1`–`KEY4`.
+There is **no `F` prefix** — `FDATE1`, `FCHAR1`, `FINT1`, `FREAL1` do not exist.
+
+Some generated specifications and documentation incorrectly use the `F`-prefix
+notation (a confusion with SQLI form-column variable syntax `:$.FDATE1`).
+SQLI compilation is lenient: `INSERT INTO GENERALLOAD (FDATE1) VALUES (…)` does
+NOT produce a compile error — the column is silently ignored and receives NULL
+at runtime, breaking the interface load with no visible error.
+
+Verify column names with:
+```sql
+SELECT COLUMNNAME FROM COLUMNS
+WHERE TABLENAME = 'GENERALLOAD' FORMAT;
+```
+
+*(seen in: session-2026-05-02-tgml-phase1)*
+
+**GENERALLOAD column widths — always use TEXT* for multi-char values:**
+
+| Column family | Width | Notes |
+|---------------|-------|-------|
+| `CHAR1`–`CHAR25` | **1** | Single character only — use for Y/N flags or 1-char codes |
+| `TEXT1` | 56 | |
+| `TEXT2`, `TEXT3` | 68 | Maximum width in the family |
+| `TEXT4`, `TEXT6` | 48 | |
+| `TEXT5`, `TEXT10` | 30 | |
+| `TEXT7` | 100 | Longest TEXT column |
+| `TEXT8`, `TEXT9` | 80 | |
+| `TEXT11`–`TEXT13`, `TEXT17`, `TEXT18` | 20 | |
+| `TEXT14`, `TEXT15` | 24 | |
+| `INT1`–`INTn` | 8 (integer) | |
+| `REAL1`–`REALn` | 8 (decimal) | |
+| `DATE1`–`DATEn` | 8 (date/datetime) | |
+
+**Rule:** use a `TEXT*` column (not `CHAR*`) whenever the source value is more
+than one character. `CHAR1` mapped to a 2-char source value silently truncates
+to 1 char at load time. Width mismatches between source GENERALLOAD columns and
+target form columns also cause INTERCLMNS `saveRow` to hang silently — see
+§INTERCLMNS saveRow width-mismatch hang in the EDI internals section below.
+
+*(seen in: session-2026-05-02-tgml-phase1)*
+
 In the **Forms for Import** sublevel, record:
 - The form(s) with which to interface
 - The **Code (Record Type)** associated with each form
@@ -217,6 +261,34 @@ based on the system's decimal precision settings */
 ```
 
 **Tip:** Use `SQL.LINE` to auto-increment LINE values when inserting multiple lines.
+
+**RECORDTYPE is mandatory — omitting it causes a silent empty-row failure:**
+Every `INSERT INTO GENERALLOAD` row must include a `RECORDTYPE` value matching
+the `TYPE` field on the corresponding `INTERFORMS` row. Omitting `RECORDTYPE`
+(or leaving it as an empty string) does NOT cause a compile error or an
+`EXECUTE INTERFACE` abort. Instead:
+- The row is silently inserted as `RECORDTYPE = ' '`.
+- The interface executes and returns success at the SQLI level.
+- ERRMSGS receives: `"Line 1 - Record type ' ' is not defined in the 'Forms for Loading' screen"`.
+- All data for that row is silently discarded.
+
+This is a silent data-loss failure. Always include `RECORDTYPE = '<type>'` in every INSERT:
+
+```sql
+-- WRONG — compiles, executes, silently discards data:
+INSERT INTO GENERALLOAD(LINE, TEXT2) SELECT SQL.LINE, CUSTNAME FROM CUSTOMERS;
+
+-- RIGHT:
+INSERT INTO GENERALLOAD(LINE, RECORDTYPE, TEXT2)
+SELECT SQL.LINE, '1', CUSTNAME FROM CUSTOMERS;
+```
+
+**Diagnostic:** after `EXECUTE INTERFACE`, check ERRMSGS with:
+```sql
+SELECT MESSAGE FROM ERRMSGS WHERE USER = SQL.USER AND TYPE = 'i' FORMAT;
+```
+
+*(seen in: session-2026-05-02-tgml-phase1 — confirmed by eval-investigator, 2026-05-02)*
 
 Resulting GENERALLOAD table:
 
@@ -541,6 +613,24 @@ EXECUTE INTERFACE 'interface_name', ['msgfile'], ['-L', 'link_file'],
 ['-o' | '-ou' | '-ou8' [, '-f', 'output_file']], ['-debug', 'debug_file'],
 ['-repeat'],['-l', 'table_name1', 'link_file1'], '-v';
 ```
+
+**Missing comma between interface name and message-file path is a compile-time parse error:**
+`EXECUTE INTERFACE 'NAME' SQL.TMPFILE` (no comma after the name) fails at compile time:
+```
+parse error at or near symbol SQL.TMPFILE
+```
+The comma is mandatory. Generated specs and AI-produced code frequently omit it.
+Correct forms:
+```sql
+EXECUTE INTERFACE 'MY_INTERFACE', SQL.TMPFILE;                        -- minimal
+EXECUTE INTERFACE 'MY_INTERFACE', SQL.TMPFILE, '-L', :DEMO_GEN;       -- with link file
+EXECUTE INTERFACE 'MY_INTERFACE', SQL.TMPFILE, '-L', :TMP, '-nl';     -- with flags
+```
+When a compile error points to the EXECUTE INTERFACE line, check for the missing
+comma first — it is the single most common source of INTERFACE parse errors in
+generated code.
+
+*(seen in: session-2026-05-02-tgml-phase1 — confirmed by eval-investigator, 2026-05-02)*
 
 ### Complete Parameter Reference
 
@@ -1391,3 +1481,37 @@ SELECT EXEC, ENAME, TYPE FROM EXEC WHERE ENAME = 'LOADCUST' FORMAT;
 - `POS` — ordering within the record-type column set
 
 *(seen in: TGML_PSERIESLOAD interface investigation + EINTER/LOAD harvest — 2026-04-30)*
+
+### INTERCLMNS saveRow width-mismatch hang
+
+When the source GENERALLOAD column (`NAME2`) has a greater width than the
+target form column (`FCNAME`), `websdk_form_action saveRow` on INTERCLMNS
+returns `"Child script returned no output"` with no informative error. The
+WebSDK call aborts mid-way, leaving stale form state (use `undoRow` to
+recover). The INTERCLMNS row is NOT committed.
+
+This is a **silent failure** — no error message, no abort signal from EXECUTE
+INTERFACE, no indication that the mapping was not saved.
+
+**Fix before adding the INTERCLMNS row:**
+1. Check the target column width:
+   ```sql
+   SELECT COLUMNNAME, COLWIDTH FROM COLUMNS
+   WHERE TABLENAME = 'TGML_PRODSERIES' FORMAT;
+   ```
+2. If `target_width < source_width`, widen the target first:
+   ```sql
+   FOR TABLE TGML_PRODSERIES COLUMN DAYNAME CHANGE WIDTH TO 30;
+   ```
+3. Recompile any form that uses that table after the width change.
+4. Retry the INTERCLMNS saveRow.
+
+**Example:** `GENERALLOAD.TEXT5` (WIDTH=30) → `TGML_PRODSERIES.DAYNAME` (CHAR 4):
+saveRow returns "Child script returned no output". After `CHANGE WIDTH TO 30`,
+saveRow succeeds immediately.
+
+Combined with the GENERALLOAD CHAR1=width-1 rule (see §Mapping the Interface
+above): any mapping of a `CHAR*` source column to a multi-char target column
+will also trigger this hang if the target was designed expecting a wider value.
+
+*(seen in: session-2026-05-02-tgml-phase1)*

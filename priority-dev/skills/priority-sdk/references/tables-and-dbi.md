@@ -591,6 +591,25 @@ FOR TABLE table_name COLUMN column_name CHANGE WIDTH TO integer;
 FOR TABLE table_name COLUMN column_name CHANGE TITLE TO 'title';
 ```
 
+**Recompile all dependent forms after any DBI ALTER (CHANGE TITLE TO / CHANGE WIDTH TO):**
+`CHANGE TITLE TO` and `CHANGE WIDTH TO` invalidate the compiled state of every
+form whose base table includes the altered column. Affected forms show
+`"המסך לא מוכן"` ("screen not ready") until recompiled. Dependency scope:
+- The primary form for the table itself
+- Any form that imports the column via a join (look up `FORMCLMNS WHERE CNAME = 'COL'`)
+- Any subform or parent form in the same form tree
+
+After a batch of DBI ALTERs, compile each known dependent form with a
+**separate** `websdk_form_action` compile call:
+```json
+{"operations": [{"op": "compile", "entity": "TGML_PATHCFG"}]}
+{"operations": [{"op": "compile", "entity": "TGML_PRODSERIES"}]}
+```
+Issue one compile call per entity — the compile op processes only the first
+entity in a multi-op call (see `references/vscode-bridge-examples.md` §Compilation).
+
+*(seen in: session-2026-05-02-tgml-phase1)*
+
 **Change decimal precision:**
 ```sql
 FOR TABLE table_name COLUMN column_name

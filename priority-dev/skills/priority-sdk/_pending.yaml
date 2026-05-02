@@ -2,37 +2,4 @@
 # Appended by Scouts (Mode 1: /gap-scan) and the learning-extractor (Mode 2: SessionEnd loop).
 # Drained by the curator (gap-curator mode) on approval or rejection.
 # Schema defined in docs/superpowers/specs/2026-04-23-gap-scan-design.md.
-candidates:
-  - id: a1b2c3d4-e5f6-7890-abcd-ef1234567809
-    added_at: "2026-05-02T00:00:00Z"
-    source_mode: continuous
-    source_ref: session-2026-05-02-tgml-phase1
-    classification: partial
-    pattern_name: prepareProc reports success even when UI shows compile errors; run_inline_sqli mode=sqli suppresses ERRMSG output
-    pattern_signature: bridge-prepareproc-false-success-sqli-errmsg-suppressed
-    evidence:
-      metadata_table: transcript
-      snippet: |
-        run_windbi_command("priority.prepareProc") returned "Compilation completed"
-        with no errors. Opening the procedure in Priority web UI showed a compile
-        error on the same code.
-        run_inline_sqli(mode='sqli') with SELECT INTO + ERRMSG: output was
-        "Execution ok" — no ERRMSG message surfaced.
-        Conclusion: bridge prepareProc and run_inline_sqli are not authoritative for
-        diagnosis. UI compile and UI execution are the ground truth.
-    proposed_edit:
-      target: references/debugging.md §Bridge Tools §prepareProc reliability
-      diff: |
-        | Tool / command | Reliability issue |
-        |----------------|-------------------|
-        | `run_windbi_command("priority.prepareProc")` | May report "Compilation completed" when the procedure has real compile errors visible in the UI. Not authoritative. |
-        | `run_inline_sqli(mode='sqli')` with `ERRMSG` | ERRMSG / WRNMSG output is suppressed — result is always "Execution ok" regardless of errors fired. Use for data queries only, not for diagnostic error probes. |
-        **Ground truth for procedure diagnostics:**
-        - Open the procedure in the Priority web UI and run Prepare from there.
-        - Execute the procedure from the web UI and observe actual behavior.
-        - For body-execution probes, use INSERT into a custom debug table (see
-          Debugging Techniques § Marker INSERT technique) rather than ERRMSG.
-    notes: |
-      Developers who rely solely on bridge tool output for "did this compile / did
-      this execute" checks will get false confidence. This is a durable reliability
-      limitation that affects every diagnostic workflow using bridge tools.
+candidates: []

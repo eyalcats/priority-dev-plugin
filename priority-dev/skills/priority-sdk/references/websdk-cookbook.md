@@ -159,6 +159,25 @@ FORMPREPERRS exists and can be read via WebSDK. Each compile **overwrites/refill
 | `fieldUpdate(IDJOINE, "10")` or higher | `סמן מספר מ-0 עד 9 ובנוסף אפשרי ? או !` | IDJOINE accepts ONLY 0–9 (plus `?` and `!`). Old memory claim of "0–99" was wrong. Re-use numbers across different JTNAMEs if needed — IDJOINE only disambiguates when the same target table appears multiple times |
 | `fieldUpdate(JTNAME, "USERSLOGIN")` | `ערך 'USERSLOGIN' לא קיים בעמודה 'טבלת חיתוך'` | Not every plausible table name is a valid JTNAME on every server. Use `EFORM filter(TITLE, "user%", LIKE)` to discover real names, or skip the join and stamp the column from `SQL.USER` in a trigger |
 | `fieldUpdate(SUM, "U")` | `Can't find column: SUM` | `SUM` is a FCLMN metadata field not exposed via WebSDK. For autounique, use a PRE-INSERT trigger: `SELECT NVL(MAX(KLINE),0)+1 INTO :$.KLINE FROM <table>;` |
+| `fieldUpdate` on a `HIDEBOOL=Y` column | `"Can't find column: <COLNAME>"` | The form engine hides the column from the WebSDK surface — `fieldUpdate` cannot reference it. Do not call `fieldUpdate` on hidden columns. A `newRow + saveRow` chain that does NOT reference the hidden column succeeds (table default or PRE-INSERT trigger supplies the value). See note below. |
+
+**HIDEBOOL=Y + NOT-NULL = singleton enforcement at the form layer:**
+Setting `HIDEBOOL='Y'` on a NOT-NULL column with no WebSDK-accessible default
+makes it impossible to supply a value via `fieldUpdate` — the column is hidden
+from the WebSDK surface. Importantly: **the error fires on `fieldUpdate` of the
+hidden column, NOT on `newRow` itself.** A bare `newRow + saveRow` (without
+calling `fieldUpdate` on the hidden column) may succeed if the column has a
+table default or a PRE-INSERT trigger sets it server-side.
+
+This pattern is intentional for singleton-table enforcement: once the one seed
+row exists, any attempt to call `fieldUpdate` on the hidden column is blocked
+with `"Can't find column: <COLNAME>"`. The error message is the distinguishing
+symptom — distinct from a trigger ERRMSG, which includes a message number.
+
+Verified 2026-05-02 on TGML_PATHCFG.DUMMY (NOT NULL, HIDEBOOL=Y, UNIQUE key)
+— eval-investigator confirmed.
+
+*(seen in: session-2026-05-02-tgml-phase1)*
 
 ---
 

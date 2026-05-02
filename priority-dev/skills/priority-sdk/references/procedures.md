@@ -206,6 +206,36 @@ The entity name of the L step must match the load file name registered in **Char
 
 *(seen in: LOADORDERS)*
 
+### Procedure step code — PROG form and write_to_editor
+
+The Priority form for editing procedure step code (the SQLI body of a step) is
+**`PROG`** (table name `PROGRAMS`, Hebrew title "שלבי הפרוצדורה"). It is NOT
+accessible as a subform of `EXEC`:
+- `startSubForm("STEP")` on EXEC → "Can't find Sub Form"
+- `startSubForm("STEPS")` on EXEC → "Can't find Sub Form"
+- `startSubForm("FEXEC")` on EXEC → "Can't find Sub Form"
+
+**In practice, do not navigate PROG via WebSDK.** Use `write_to_editor` to
+write procedure step code directly:
+```js
+write_to_editor({
+  entityType: "PROC",
+  entityName: "MY_PROCEDURE",
+  stepName: "10_SQLI",    // <PROGRAMS.POS>_SQLI — see vscode-bridge-examples.md
+  content: "/* full SQLI step code */"
+})
+```
+
+`PROGRAMS.POS` values are Priority-assigned (5, 10, 15, 20…), not sequential
+1, 2, 3. Query to find a step's POS:
+```sql
+SELECT POS FROM PROGRAMS
+WHERE EXEC = (SELECT EXEC FROM EXEC WHERE ENAME = 'MY_PROCEDURE' AND TYPE = 'P')
+FORMAT;
+```
+
+*(seen in: session-2026-05-02-tgml-phase1)*
+
 ### Basic Commands
 
 | Command | Description |

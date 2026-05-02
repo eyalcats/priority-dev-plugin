@@ -177,6 +177,38 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Split into single-event triggers (POST-INSERT + POST-UPDATE, share logic via INCLUDE), or invoke a helper procedure from the combined slot.
 - **See:** `triggers.md` § "Cursors cannot run in combined triggers" (SDK 23.1 release-notes gotcha).
 
+### Hebrew (RTL) string literals in SQLI UPDATE/INSERT via run_inline_sqli
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `parse error at or near symbol <Hebrew char>` on `UPDATE`/`INSERT` via `run_inline_sqli` | Hebrew (RTL) string literals in the OData SQLI endpoint — the WCF SQLI parser rejects non-ASCII literals in UPDATE/INSERT statements | Use `websdk_form_action fieldUpdate` with the Hebrew value as a JSON string (the bridge handles encoding); or use `run_inline_sqli(mode='dbi')` which accepts Hebrew in `CHANGE TITLE TO` |
+| `Unclosed string` on SQLI UPDATE with multi-line value | SQLI string literals do not support embedded newlines | Split into multiple single-line `fieldUpdate` calls; for UPGNOTESTEXT, write one TEXTLINE row per call (max 68 chars each) |
+
+**Scope:** only the `run_inline_sqli(mode='sqli')` OData path is affected.
+`run_inline_sqli(mode='dbi')` **does** accept Hebrew literals in `CHANGE TITLE TO 'Hebrew'`
+— the DBI parser handles Unicode. The SQLI path does not.
+
+**Workaround pattern (editing a text value containing Hebrew):**
+```js
+// Instead of: run_inline_sqli("UPDATE T SET COL = 'Hebrew text'")
+// Use WebSDK fieldUpdate — pass the Hebrew string directly in the value:
+websdk_form_action({
+  form: "MY_FORM",
+  operations: [
+    { op: "filter", field: "KEY", value: "1" },
+    { op: "getRows" },
+    { op: "setActiveRow", row: 1 },
+    { op: "fieldUpdate", field: "COL", value: "נתיב CSV" },
+    { op: "saveRow" }
+  ]
+})
+```
+
+For UPGNOTESTEXT specifically, see `references/vscode-bridge-examples.md`
+§Shell Generation step 5 for the 4-deep WebSDK navigation recipe.
+
+*(seen in: session-2026-05-02-tgml-phase1 — UPGNOTESTEXT Hebrew DBI title fix)*
+
 ### Embedding Hebrew character literals directly in SQLI procedure or trigger code on Hebrew installs
 - **Symptom:** Code looks correct in the editor but compiles wrong or produces incorrect results at runtime. Opening `PROGRAMSTEXT` or `FORMTRIGTEXT` for the saved step reveals the entire line has been stored reversed (RTL).
 - **Root cause:** `PROGRAMSTEXT.TEXT` and `FORMTRIGTEXT.TEXT` are `CHAR(68)` columns. On a Hebrew Priority installation the database client renders these columns RTL, causing any line that contains a Hebrew character literal to be stored with its characters in reversed order. The reversed line is syntactically invalid SQLI.

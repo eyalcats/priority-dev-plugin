@@ -837,9 +837,17 @@ For form operations (querying forms, running procedures, CRUD) use `websdk_form_
 | Command | What it does |
 |---------|-------------|
 | `priority.searchInExplorer` | Search the environments tree |
-| `priority.refreshExplorer` | Refresh the environments tree |
+| `priority.refreshExplorer` | Refresh the environments tree — **reloads from local VSCode storage only, NOT from the Priority server.** Entities created via WebSDK, TAKEUPGRADE, or any path outside VSCode will NOT appear until a full environment re-fetch (which only occurs when the environment is first added). Running this command after creating an entity via upgrade install or WebSDK will NOT make it visible. |
 | `priority.showLogs` | Show extension logs |
 | `priority.showFileLogs` | Show file-specific logs |
+
+**If a procedure or form is missing from the Environments Explorer** after being
+created via WebSDK or an upgrade install:
+1. Use `Ctrl+Shift+P → "Priority: Search in Explorer"` — finds entities by name even when the tree node is not visible.
+2. Use `write_to_editor(entityType="PROC", entityName=..., stepName="<POS>_SQLI")` directly — the OData fallback path does not require the file to be open in the editor.
+3. Open the entity through the Priority web client, then return to VSCode.
+
+*(seen in: session-2026-05-02-tgml-phase1 — refreshExplorer log showed "Receiving environments data from the storages" not from server; TGML_INITSERIES created via upgrade was invisible until direct write_to_editor was used)*
 
 ### Typical Workflow
 
@@ -903,6 +911,20 @@ Commands with "Yes" in Input Dialog use a clipboard-paste auto-fill mechanism (6
 **Gateway alternatives for unreliable bridge commands:** When dump commands fail to capture output (webview limitation), use the WebSDK Gateway tools `dump-entity` and `read-code` instead — they return structured data directly.
 
 See `references/vscode-bridge-examples.md` for detailed tool usage examples.
+
+### Bridge tool reliability limitations
+
+| Tool / command | Reliability issue |
+|----------------|-------------------|
+| `run_windbi_command("priority.prepareProc")` | May report "Compilation completed" when the procedure has real compile errors visible in the UI. Not authoritative. Verified false-positive observed in session-2026-05-02-tgml-phase1. |
+| `run_inline_sqli(mode='sqli')` with `ERRMSG` or `WRNMSG` | ERRMSG / WRNMSG output is suppressed — the result is always "Execution ok" regardless of errors fired. Confirmed: `ERRMSG 999 WHERE 1 = 1` returns "Execution ok" with no message text. Use for data queries only, not for diagnostic error probes. |
+
+**Ground truth for procedure diagnostics:**
+- Open the procedure in the Priority web UI and run Prepare from there.
+- Execute the procedure from the web UI and observe actual error dialogs.
+- For body-execution probes, use INSERT into a custom debug table (see §Diagnostic Techniques → "Marker INSERT technique") rather than ERRMSG.
+
+*(seen in: session-2026-05-02-tgml-phase1 — ERRMSG suppression confirmed by eval-investigator probe, 2026-05-02)*
 
 ---
 

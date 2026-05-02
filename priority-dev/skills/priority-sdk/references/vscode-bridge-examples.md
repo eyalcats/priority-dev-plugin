@@ -191,12 +191,59 @@ Always use `write_to_editor` for trigger and procedure code. It writes full mult
 write_to_editor(entityType="FORM", entityName="MYFORM", stepName="PRE-INSERT", content="full SQLI code")
 ```
 
+**Procedure steps without VSCode open (OData fallback):**
+`write_to_editor` falls back to the Priority OData API when no matching
+`priorityfs://` file is open in VSCode. For PROC entities, `stepName` must
+be `<PROGRAMS.POS>_SQLI` where POS is the value in the `PROGRAMS.POS`
+column (5, 10, 15, 20, … — these are Priority-assigned positions, NOT
+sequential 1, 2, 3):
+
+```js
+write_to_editor({
+  entityType: "PROC",
+  entityName: "TGML_INITSERIES",
+  stepName: "10_SQLI",     // POS=10 in PROGRAMS table, not "step 10"
+  content: "/* full SQLI code here */"
+})
+```
+
+To find a step's POS value:
+```sql
+SELECT ENAME, POS FROM PROGRAMS
+WHERE EXEC = (SELECT EXEC FROM EXEC WHERE ENAME = 'TGML_INITSERIES' AND TYPE = 'P')
+FORMAT;
+```
+
+Verified 2026-05-02: wrote TGML_INITSERIES step at POS=10 via OData while the
+VSCode Environments Explorer showed the procedure as missing (stale cache). The
+write and subsequent compile both succeeded.
+
+*(seen in: session-2026-05-02-tgml-phase1)*
+
 #### Compilation — Use WebSDK compile compound
 
 ```json
 {"operations": [{"op": "compile", "entity": "MYFORM"}]}
 ```
 Returns `status: 'ok'` on success. Check WINDBI panel if you need to see the compile report.
+
+**One entity per compile call — second entity is silently skipped:**
+The `compile` op processes only the first entity in the `operations` array.
+If you include two `{"op": "compile", "entity": "X"}` ops in a single
+`websdk_form_action` call, only the first entity is compiled; the second is
+silently skipped with no error or warning.
+
+To compile multiple entities, issue separate calls:
+```json
+{"operations": [{"op": "compile", "entity": "FORM_A"}]}
+{"operations": [{"op": "compile", "entity": "FORM_B"}]}
+```
+
+This affects post-DBI batch compilation (e.g., after `CHANGE TITLE TO` or
+`CHANGE WIDTH TO` — see `references/tables-and-dbi.md` §DBI Syntax Reference
+for the recompile requirement). Issue one compile call per dependent form.
+
+*(seen in: session-2026-05-02-tgml-phase1)*
 
 #### Shell Generation — Use WebSDK primitives on UPGRADES
 
@@ -248,6 +295,35 @@ Returns `downloadUrl` in the result data.
 {"operations": [{"op": "downloadFile", "url": "https://server/netfiles/file.txt", "filename": "my_upgrade.sh"}]}
 ```
 Downloads, converts UTF-16 to UTF-8, forces `.sh` extension, saves to temp directory.
+
+5. **Edit existing UPGNOTESTEXT lines in place (e.g., fix DBI text or Hebrew titles):**
+UPGNOTES rows contain text sub-lines in the UPGNOTESTEXT subform (TEXT column,
+CHAR 68). To edit line-by-line without SQLI (required when text contains Hebrew
+or multi-line content that `run_inline_sqli` SQLI UPDATE cannot handle):
+
+```json
+{"form": "UPGRADES", "operations": [
+  {"op": "filter",        "field": "UPGNUM", "value": "20162202"},
+  {"op": "getRows"},
+  {"op": "setActiveRow",  "row": 1},
+  {"op": "startSubForm",  "name": "UPGNOTES"},
+  {"op": "setActiveRow",  "row": 1},
+  {"op": "startSubForm",  "name": "UPGNOTESTEXT"},
+  {"op": "setActiveRow",  "row": 2},
+  {"op": "fieldUpdate",   "field": "TEXT",
+                          "value": "FOR TABLE TGML_PATHCFG CHANGE TITLE TO 'נתיב CSV';"},
+  {"op": "saveRow"}
+]}
+```
+
+Key notes:
+- `setActiveRow(N)` on UPGNOTES: N = row index (position in the list), NOT the ORD value. Filter on ORD is unreliable; navigate by row position.
+- `setActiveRow(N)` on UPGNOTESTEXT: N = TEXTLINE value (1-based).
+- Hebrew and other non-ASCII content: use JSON `\uXXXX` Unicode escapes in the `value` string — they round-trip cleanly through the WebSDK fieldUpdate path.
+- Max 68 chars per UPGNOTESTEXT.TEXT line (CHAR 68).
+- This is the only reliable path for Hebrew DBI titles: `UPDATE … SET TEXT = 'Hebrew'` via `run_inline_sqli` fails with "parse error at or near symbol" — see `references/common-mistakes.md` §Hebrew literals in SQLI.
+
+*(seen in: session-2026-05-02-tgml-phase1 — UPGNOTES Hebrew DBI title fix)*
 
 #### Table Structure — DBI via run_windbi_command
 
