@@ -344,6 +344,44 @@ Server Buffered=0
 | TAKEWORDTMPL | Addition/revision of a Word template |
 | TAKEHELP | Addition/revision of online help |
 
+#### TAKEMENULINK — linking a custom menu under a system parent
+
+To deploy a custom menu as a child of an existing system menu, add an UPGNOTES entry:
+
+| Field | Value |
+|-------|-------|
+| UPGCODE | `TAKEMENULINK` |
+| ENAME | `<PARENT_MENU>_MODULE` (see table below) |
+| SONENAME | `<child menu name>` |
+| SONTYPE | `M` |
+| BOUND | `Y` |
+
+**Common parent menu ENAME values:**
+
+| System menu | ENAME to use |
+|-------------|--------------|
+| System Management | `SYSMAINTEN_MODULE` |
+| System Data | `SYSDATA_MODULE` |
+
+The canonical naming pattern is `<PARENT_MENU_NAME>_MODULE`. Using the plain parent
+name (e.g., `SYSMAINTEN` without `_MODULE`) triggers the form's CHECK-FIELD trigger,
+which loads the entire menu tree and causes a bridge timeout.
+
+**Do NOT use `TAKEDIRECTACT` for menu-to-submenu links.** `TAKEDIRECTACT` is for
+"a form has a direct activation calling a procedure" — a different concept — and will
+fail or timeout when applied to menu linkage.
+
+Example UPGNOTES sequence for a new menu under System Management:
+
+```
+ORD=1  UPGCODE=TAKESINGLEENT  ENAME=TGML_MYMENU  TYPE=M  BOUND=Y
+ORD=2  UPGCODE=TAKEMENULINK   ENAME=SYSMAINTEN_MODULE  SONENAME=TGML_MYMENU  SONTYPE=M  BOUND=Y
+```
+
+The `TAKESINGLEENT` for the child menu must appear before the `TAKEMENULINK`.
+
+*(verified: 28 live UPGNOTES rows with UPGTYPE=25 confirm `_MODULE` suffix on top-level system parents; SONTYPE varies M/F/P/R)*
+
 ### Choosing the Right UPGCODE (Decision Guide)
 
 See `deployment.md` § "Choosing the right UPGCODE" for the canonical decision table and rationale. Summary: use the most specific UPGCODE per change (`TAKETRIG` for trigger changes, `TAKEFORMCOL` for column changes, etc.); `TAKESINGLEENT` only for brand-new entities.

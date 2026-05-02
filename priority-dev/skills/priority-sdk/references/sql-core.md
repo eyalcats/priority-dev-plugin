@@ -258,6 +258,21 @@ KEYSTROKES = {Key Right} 01/01/06 {Exit};
 | `REFRESH` | Refresh screen with updated values (form triggers only) |
 | `MAILMSG` | Send internal/external mail message |
 
+> **Constructs that do NOT exist in Priority SQLI — each produces a parse error:**
+>
+> | Standard SQL / PL-SQL construct | Priority SQLI equivalent |
+> |---------------------------------|--------------------------|
+> | `WHILE cond LOOP ... END LOOP` | `LABEL N; ... LOOP N WHERE cond;` |
+> | `IF cond THEN ... END IF` | `GOTO skip WHERE NOT cond; ... LABEL skip;` |
+> | `IF/ELSIF/ELSE` | Nested GOTO/LABEL chains or ternary `(cond ? a : b)` |
+> | `FOR i IN 1..N LOOP` | DECLARE cursor over a generated range + FETCH loop |
+>
+> The ternary expression `(condition ? value_if_true : value_if_false)` is the
+> only inline conditional. All branching beyond that uses GOTO/LOOP/LABEL with
+> optional WHERE clauses.
+>
+> *(verified: WHILE and IF each produce a parse error; LABEL/LOOP construct works correctly)*
+
 ### Syntax
 
 ```sql
@@ -811,6 +826,22 @@ Return string length (integer).
 SELECT STRLEN('Priority') FROM DUMMY FORMAT; /* 8 */
 ```
 
+> **Functions that do NOT exist in Priority SQLI — use these equivalents instead:**
+>
+> | Function developers expect | Priority SQLI equivalent |
+> |---------------------------|--------------------------|
+> | `LENGTH(string)` | `STRLEN(string)` |
+> | `ASCII(char)` | No direct equivalent — use integer math or `DTOA` for display |
+> | `CHARINDEX(sub, str)` | `STRINDEX(str, sub, 1)` |
+> | `ISNULL(x, y)` | `(x = '' ? y : x)` for CHAR; `(x = 0 ? y : x)` for INT |
+>
+> Note: `DAYOFWEEK(date)` is documented separately in the Date Functions section.
+> On Hebrew installs, `DTOA(date, 'day')` returns the Hebrew weekday abbreviation
+> letter (e.g., 'א' for Sunday). Prefer integer day-of-week arithmetic via `DAY()`
+> to avoid RTL source-code issues.
+>
+> *(verified: LENGTH and ASCII each produce a parse error; STRLEN and STRINDEX work correctly)*
+
 ##### ISALPHA(string)
 Test if a string begins with a letter and contains only letters, digits, and underscores. Returns 1 or 0.
 ```sql
@@ -998,6 +1029,25 @@ SELECT NEWATTACH('C:\TMP\LOGFILe.zip') FROM CUSTOMERS WHERE CUST = 0 FORMAT;
 ### Date Functions
 
 Dates, times, and days are stored as integers. Dates display in American (MMDDYY) or European (DDMMYY) format depending on the language setting.
+
+> **Date arithmetic — use `+24:00` to advance by one day, not `+1`.**
+> The internal unit is one minute, so adding `1` advances by one minute, not one day.
+>
+> ```sql
+> /* WRONG — :D advances by 1 minute, not 1 day */
+> :D = :D + 1;
+> /* CORRECT — advances by exactly 1 day */
+> :D = :D + 24:00;
+> /* Multi-day steps */
+> :D = :D + 72:00;   /* +3 days */
+> :D = :D + 168:00;  /* +7 days (1 week) */
+> ```
+>
+> This applies in date-stepping loops, expiry calculations, and any arithmetic
+> on DATE-type variables or columns. The `MOD 24:00` pattern (Mathematical
+> Expressions section) extracts the time component from a DATE14 value.
+>
+> *(verified: `01/05/26 + 1` = `01/05/26 00:01`; `01/05/26 + 24:00` = `02/05/26`)*
 
 #### Date Parsing
 

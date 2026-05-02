@@ -437,6 +437,31 @@ Use the wildcard `$` for the current procedure:
 :$.ParameterName
 ```
 
+#### Type Coercion — always copy parameters into typed local variables
+
+Always copy procedure parameters into typed local variables at the top of
+each SQLI step body using the `0 +` (or `0.0 +`) type coercion:
+
+```sql
+/* INT or DATE parameters — use 0 + */
+:FDT = 0 + :$.FDT;
+:TDT = 0 + :$.TDT;
+:QTY = 0 + :$.QTY;
+/* REAL parameters — use 0.0 + */
+:RATE = 0.0 + :$.RATE;
+/* CHAR parameters — no coercion needed (CHAR is the default type) */
+:CUST = :$.CUST;
+```
+
+**Why this is necessary:**
+1. `:$.PARAM` without a type context resolves as `CHAR` regardless of the
+   declared parameter type — date/numeric comparisons then silently fail.
+2. `0 +` forces the variable to `INT`/`DATE`/`TIME` type (matching the
+   declaration) AND suppresses the static "Unresolved identifier" warning
+   for variables not yet defined in the current step context.
+
+*(seen in: UPDATESALESRATEPER, INTEREST, CASHINVOICES — pattern present in 330+ distinct system procedures)*
+
 ### Handle Heavy Processing
 
 A single procedure can have up to **100 cursors** open simultaneously. Reuse the same cursor more than once, but declare it only once. If using a buffer with a cursor multiple times, write the declaration section in a separate buffer.
