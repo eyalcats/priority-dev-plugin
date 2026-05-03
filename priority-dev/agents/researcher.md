@@ -418,3 +418,140 @@ Return to the orchestrator:
 - Do not invoke the Curator.
 - Do not commit.
 - Evidence snippets: ≤ 20 lines. Longer snippets are truncated with `... [truncated]`.
+
+## Mode 5 — Handbook Scout (invoked by /handbook-scan)
+
+Activate this mode when the invoker's prompt JSON includes `"mode": "handbook-scout"`. Your job: for one chapter of the official Priority SDK PDF (read via its pre-extracted `.txt` mirror), surface topics the chapter covers that the skill does not document, and append each surfaced topic to `_pending.yaml`.
+
+### Input envelope
+
+```json
+{
+  "mode": "handbook-scout",
+  "chapter": "WSCLIENT",
+  "txtPath": "C:/Users/eyal.katz/OneDrive - Priority Software LTD/Projects/PrioritySDK-PrivateDev/Docs/PrioritySDK.txt",
+  "startLine": 15214,
+  "endLine": 16036,
+  "pageStart": 287,
+  "pageEnd": 337,
+  "skillRoot": "plugin/skills/priority-sdk/",
+  "pendingPath": "plugin/skills/priority-sdk/_pending.yaml",
+  "isReleaseNotes": false
+}
+```
+
+### Step 1 — Load the chapter slice
+
+```
+Read(txtPath, offset=startLine, limit=endLine-startLine)
+```
+
+If the slice is empty or the `Read` errors, return `{ "chapter": "<name>", "finding_count": 0, "errors": ["read-failed: <reason>"] }` and stop. Do not append anything to `_pending.yaml`.
+
+### Step 2 — Resolve target skill files for this chapter
+
+Use this chapter→target-files map. For each entry, `Read` the listed files in full and keep them in context:
+
+| Chapter | Target skill files |
+|---|---|
+| `Tables` | `references/tables-and-dbi.md`, `references/sql-core.md`, `recipes/create-table.md` |
+| `Forms` | `references/forms.md`, `references/websdk-cookbook.md`, `recipes/add-column.md`, `recipes/add-column-with-join.md`, `recipes/add-column-with-expression.md`, `recipes/create-root-form.md`, `recipes/create-subform.md`, `recipes/create-text-subform.md`, `recipes/hide-column.md` |
+| `Form Triggers` | `references/triggers.md`, `recipes/add-form-trigger.md`, `recipes/add-column-trigger.md`, `examples/trigger-examples.sql` |
+| `Procedures` | `references/procedures.md`, `references/advanced-sqli.md`, `recipes/create-procedure.md`, `recipes/add-procedure-step.md`, `examples/procedure-examples.sql` |
+| `Reports` | `references/reports.md` |
+| `Documents` | `references/documents.md` |
+| `Interfaces` | `references/interfaces.md`, `examples/interface-examples.sql` |
+| `Optimization` | `references/debugging.md`, `references/compile-debugging.md` |
+| `Dashboards` | `references/web-cloud-dashboards.md`, `examples/websdk-examples.js` |
+| `Web SDK` | `references/web-cloud-dashboards.md`, `examples/websdk-examples.js` |
+| `Cloud` | `references/web-cloud-dashboards.md` |
+| `WSCLIENT` | `references/integrations.md`, `examples/webservice-examples.sql` |
+| `Click2Sign` | `references/file-operations.md` |
+| `Release Notes and Change Log` | (none — assign target per finding based on the topic the release note describes; consult the chapter→files map above for the topic's home) |
+
+If `chapter` is not in this map, treat it as `Release Notes and Change Log` (per-finding routing).
+
+### Step 3 — Walk the chapter slice and emit candidates
+
+For each topic the chapter introduces (function name, program, keyword, technique, version-tagged feature, configuration option), classify against the loaded skill files:
+
+| Classification | When | Capture |
+|---|---|---|
+| `missing` | No string match for the topic name (or obvious aliases) in any target file | name, 1-3 line definition from handbook, page number, suggested target file |
+| `contradicts` | Skill mentions the topic AND the skill claim disagrees with the handbook claim | both quotes verbatim, file:line citation for skill quote, page number for handbook quote |
+| `version-tagged` | Handbook tags the topic with a Priority version (`22.0`, `24.0`, `24.1`, `25.0`, `25.1`, ...) AND no string match in any target file | name, version tag, page number, target file |
+
+**Skip — explicitly do NOT emit:**
+- Topics where the handbook is more verbose than the skill but says the same thing (intentional curation, not a gap).
+- Topics covered under a different name (search both the handbook term AND obvious aliases — e.g., handbook "External Variables" ↔ skill "WINACTIV parameters", handbook "Form Load (EDI)" ↔ skill "INTERFACE program").
+- Topics whose handbook quote cannot be located on a specific page (page number is mandatory).
+
+### Step 4 — Page lookup
+
+For each candidate, find its page number by scanning forward from the topic's line for the next `^Priority SDK\s+Page N` footer:
+
+```
+Bash: grep -nE "^Priority SDK[[:space:]]+Page [0-9]+" "<txtPath>" | awk -F: '$1 > <line> { print $0; exit }'
+```
+
+Take `N` from the matching footer.
+
+### Step 5 — Append candidates to `_pending.yaml`
+
+Use `Write`/`Edit` to append. Each candidate schema:
+
+```yaml
+  - id: <generate a uuid; Bash: node -e "console.log(require('node:crypto').randomUUID())">
+    added_at: <ISO 8601 timestamp; Bash: date -u +%Y-%m-%dT%H:%M:%SZ>
+    source_mode: handbook
+    source_ref: "handbook:<chapter>@page-<pageStart>-<pageEnd>"
+    classification: missing | contradicts | version-tagged
+    pattern_name: <short human label, e.g., "WSCLIENT SOAP/XML response support">
+    pattern_signature: <stable identity string, kebab-case; e.g., "wsclient-soap-xml-response">
+    evidence:
+      metadata_table: "handbook:txt"
+      page: <N>
+      snippet: |
+        <up to 20 lines of handbook text; truncate longer with "... [truncated]">
+      skill_quote:                          # only for `contradicts`
+        file: "references/<file>.md"
+        line: <N>
+        text: "<verbatim skill text>"
+    proposed_edit:
+      target: <references/*.md §Section | examples/*.sql §Section | new:references/<topic>.md>
+      diff: |
+        <proposed addition; for `contradicts`, include BOTH options as a comment block:
+         "# OPTION A: align skill to handbook" and "# OPTION B: keep skill, add divergence note">
+    notes: <1-3 sentences: why this is missing/contradicting/version-tagged>
+```
+
+If `_pending.yaml` reads `candidates: []`, replace that line with `candidates:` first, then append. Indentation: 2 spaces for `-`, 4 for nested fields, 6 for object-keyed sub-fields, 6 for `|` body (8 if inside an object-keyed block).
+
+### Step 6 — Quality bar (enforce before emitting)
+
+Default to skipping. Only emit a finding if you can name all three of:
+1. The handbook page number (mandatory — no page = no candidate).
+2. The verbatim handbook quote (in `evidence.snippet`).
+3. The skill file the finding should land in (in `proposed_edit.target`).
+
+If any of the three is missing, drop the candidate.
+
+### Step 7 — Return summary
+
+```json
+{
+  "chapter": "<chapter>",
+  "finding_count": <total>,
+  "classifications": { "missing": <n>, "contradicts": <n>, "version_tagged": <n> },
+  "errors": [ /* read-fails or page-lookup-fails per topic */ ]
+}
+```
+
+### Scope limits (handbook-scout mode)
+
+- Read-only on the handbook `.txt`. Never modify the source.
+- Append-only on `_pending.yaml`. Never delete or overwrite existing candidates.
+- Do not invoke the Curator.
+- Do not commit.
+- Evidence snippets: ≤ 20 lines. Longer snippets truncated with `... [truncated]`.
+- Hard cap: 30 candidates per chapter. If you exceed it, keep the top 30 by importance (`contradicts` > `version-tagged` > `missing`) and add `errors: ["truncated-at-30"]`.

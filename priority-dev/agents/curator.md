@@ -233,6 +233,8 @@ For each candidate in the queue (after Phase 2 dedupe), check for an eval verdic
 | no eval | partial | ≥ 2 cited sources required |
 | no eval | missing | ≥ 1 cited source |
 | no eval | new-category | ≥ 1 cited source |
+| no eval, `source_mode: handbook` | contradicts | **admit on single source** (handbook is authoritative) — surface BOTH proposed options in the report; never silently apply |
+| no eval, `source_mode: handbook` | version-tagged | **admit on single source** — proposed edit must be prefixed with the version tag (e.g., "**24.1+** — ...") |
 
 Auto-rejection log entry format:
 
@@ -241,6 +243,8 @@ Auto-rejection log entry format:
 ```
 
 Non-admitted, non-auto-rejected findings stay in the queue.
+
+When `source_mode: handbook` candidates dominate the queue (≥ 50% of admitted findings have `source_mode: handbook`), Phase 4 groups the report by handbook chapter (extracted from `source_ref`, e.g., `handbook:WSCLIENT@page-287-337` → chapter `WSCLIENT`) instead of by target file. Within each chapter, sort findings: `contradicts` first (potential bugs), `version-tagged` second (user-impacting news), `missing` third.
 
 ### Phase 4 — Write the gap-analysis report
 
@@ -260,7 +264,29 @@ skill_sha_at_run: <from `git rev-parse HEAD`>
 
 # Gap analysis — YYYY-MM-DD — <sources>
 
-## Proposed edits (grouped by target file)
+## Proposed edits
+
+When handbook candidates dominate (≥ 50% of admitted findings have `source_mode: handbook`), group by chapter:
+
+### Chapter: <chapter name>
+- **[<classification>] <pattern_name>** (id: <id>, page <page>, target: <target file>)
+  - Handbook quote (page <page>):
+    ```
+    <evidence.snippet>
+    ```
+  - Skill quote (only for `contradicts`, <evidence.skill_quote.file>:<evidence.skill_quote.line>):
+    ```
+    <evidence.skill_quote.text>
+    ```
+  - Proposed edit (for `contradicts`, the diff contains both `# OPTION A: align skill to handbook` and `# OPTION B: keep skill, add divergence note` — render verbatim, do not split):
+    ```
+    <proposed_edit.diff>
+    ```
+  - Why: <notes>
+
+(repeat per finding, grouped by chapter; sort within chapter: contradicts → version-tagged → missing)
+
+Otherwise, group by target file:
 
 ### <target file path>
 - **[<classification>] <pattern_name>** (id: <id>, cited: <cited_sources>)
@@ -366,6 +392,10 @@ For each `approved_id`:
    ```bash
    git add <edited files>
    git commit -m "skill: <target file> — <pattern_name>"
+   ```
+   For `source_mode: handbook` candidates, append the chapter and page reference to the message:
+   ```bash
+   git commit -m "skill: <target file> — <pattern_name> (handbook §<chapter> p<page>)"
    ```
 5. Remove the applied candidate from `_pending.yaml` via `Edit`.
 
