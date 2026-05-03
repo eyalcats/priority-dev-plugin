@@ -94,11 +94,13 @@ For each chunk in the plan, invoke:
 
 ```
 Agent(
-  subagent_type: "researcher",
+  subagent_type: "handbook-scout",
   description: "Handbook scout: <chapter>",
   prompt: <JSON envelope below>
 )
 ```
+
+The `handbook-scout` agent (defined in `plugin/agents/handbook-scout.md`) is purpose-built for this: it has `Read`/`Grep`/`Bash`/`Write` and no Priority MCP tools. Do NOT spawn `researcher` for handbook scouting — that agent has only Priority MCP tools and cannot read the local `.txt` or skill files, which leads scouts to fabricate findings instead of reading the source.
 
 JSON envelope per chunk:
 ```json
