@@ -19,7 +19,7 @@ function statePath() {
 }
 
 function emptyState() {
-  return { session_id: null, references_read: {} };
+  return { session_id: null, references_read: {}, mandate_emitted: false };
 }
 
 function loadState() {
@@ -30,6 +30,7 @@ function loadState() {
     return {
       session_id: parsed.session_id ?? null,
       references_read: parsed.references_read ?? {},
+      mandate_emitted: parsed.mandate_emitted === true,
     };
   } catch {
     return emptyState();
@@ -43,7 +44,7 @@ function writeState(state) {
 }
 
 function resetState(sessionId) {
-  writeState({ session_id: sessionId ?? null, references_read: {} });
+  writeState({ session_id: sessionId ?? null, references_read: {}, mandate_emitted: false });
 }
 
 function stampReference(filename) {
@@ -61,6 +62,16 @@ function isFresh(filename, ttlMinutes) {
   return age <= ttlMinutes * 60 * 1000;
 }
 
+function getMandateEmitted() {
+  return loadState().mandate_emitted === true;
+}
+
+function setMandateEmitted() {
+  const s = loadState();
+  s.mandate_emitted = true;
+  writeState(s);
+}
+
 module.exports = {
   STATE_PATH: statePath,
   loadState,
@@ -68,4 +79,6 @@ module.exports = {
   resetState,
   stampReference,
   isFresh,
+  getMandateEmitted,
+  setMandateEmitted,
 };

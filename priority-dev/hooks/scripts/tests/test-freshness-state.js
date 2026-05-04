@@ -10,6 +10,8 @@ const {
   isFresh,
   loadState,
   STATE_PATH,
+  getMandateEmitted,
+  setMandateEmitted,
 } = require('../lib/freshness-state');
 
 function withTempState(fn) {
@@ -69,4 +71,36 @@ test('loadState returns empty shape on malformed JSON', () => withTempState(() =
   const s = loadState();
   assert.strictEqual(s.session_id, null);
   assert.deepStrictEqual(s.references_read, {});
+  assert.strictEqual(s.mandate_emitted, false);
+}));
+
+test('getMandateEmitted returns false on fresh state', () => withTempState(() => {
+  resetState('sess-1');
+  assert.strictEqual(getMandateEmitted(), false);
+}));
+
+test('setMandateEmitted flips the flag and persists across loads', () => withTempState(() => {
+  resetState('sess-1');
+  setMandateEmitted();
+  assert.strictEqual(getMandateEmitted(), true);
+  // Persists across re-load
+  const s = loadState();
+  assert.strictEqual(s.mandate_emitted, true);
+}));
+
+test('resetState clears mandate_emitted', () => withTempState(() => {
+  resetState('sess-1');
+  setMandateEmitted();
+  assert.strictEqual(getMandateEmitted(), true);
+  resetState('sess-2');
+  assert.strictEqual(getMandateEmitted(), false);
+}));
+
+test('setMandateEmitted preserves references_read', () => withTempState(() => {
+  resetState('sess-1');
+  stampReference('triggers.md');
+  setMandateEmitted();
+  const s = loadState();
+  assert.ok(s.references_read['triggers.md']);
+  assert.strictEqual(s.mandate_emitted, true);
 }));

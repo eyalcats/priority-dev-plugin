@@ -108,6 +108,52 @@ test('remind-research-first tolerates missing prompt field', () => {
   assert.strictEqual(stdout.trim(), '');
 });
 
+test('remind-research-first emits once per session, then stays silent', () => {
+  // Shared state file across two invocations to simulate same session.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-mandate-'));
+  TMP_DIRS.push(tmp);
+  const statePath = path.join(tmp, 'state.json');
+  const env = { ...process.env, PRIORITY_SDK_FRESHNESS_PATH: statePath };
+
+  // SessionStart resets the flag.
+  spawnSync(process.execPath, [path.join(HOOKS_DIR, 'reset-skill-freshness.js')], {
+    input: JSON.stringify({ session_id: 'mandate-sess' }), encoding: 'utf8', env,
+  });
+
+  // First Priority prompt → MANDATE injected.
+  const first = spawnSync(process.execPath, [path.join(HOOKS_DIR, 'remind-research-first.js')], {
+    input: JSON.stringify({ prompt: 'how do I add a CHECK-FIELD trigger?' }),
+    encoding: 'utf8', env,
+  });
+  assert.strictEqual(first.status, 0);
+  const firstOut = JSON.parse(first.stdout);
+  assert.match(firstOut.hookSpecificOutput.additionalContext, /you MUST/);
+
+  // Verify the flag was persisted.
+  const s = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.strictEqual(s.mandate_emitted, true);
+
+  // Second Priority prompt in the same session → silent.
+  const second = spawnSync(process.execPath, [path.join(HOOKS_DIR, 'remind-research-first.js')], {
+    input: JSON.stringify({ prompt: 'now look at FORMTRIG for the same form' }),
+    encoding: 'utf8', env,
+  });
+  assert.strictEqual(second.status, 0);
+  assert.strictEqual(second.stdout.trim(), '');
+
+  // SessionStart for a new session resets the flag → MANDATE re-injects.
+  spawnSync(process.execPath, [path.join(HOOKS_DIR, 'reset-skill-freshness.js')], {
+    input: JSON.stringify({ session_id: 'mandate-sess-2' }), encoding: 'utf8', env,
+  });
+  const third = spawnSync(process.execPath, [path.join(HOOKS_DIR, 'remind-research-first.js')], {
+    input: JSON.stringify({ prompt: 'check FORMCLMN for COL X' }),
+    encoding: 'utf8', env,
+  });
+  assert.strictEqual(third.status, 0);
+  const thirdOut = JSON.parse(third.stdout);
+  assert.match(thirdOut.hookSpecificOutput.additionalContext, /you MUST/);
+});
+
 test('nudge-priority-sdk nudges when websdk-cookbook.md not read', () => {
   const { status, stdout } = runHook('nudge-priority-sdk.js', {
     tool_name: 'websdk_form_action',

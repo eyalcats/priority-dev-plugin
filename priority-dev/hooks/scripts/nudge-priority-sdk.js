@@ -6,7 +6,11 @@
 const { isFresh } = require('./lib/freshness-state');
 const { requiredReferenceFor } = require('./lib/tool-reference-map');
 
-const TTL_MINUTES = 30;
+// 60 min — long enough to work on the same form/procedure without nagging.
+// The skill markdown files don't change while you work; the original 30-min
+// TTL was a guard against DB state drift, but that concern is covered by the
+// bridge directly, not by re-reading reference docs.
+const TTL_MINUTES = 60;
 
 (async function main() {
   let payload = {};
