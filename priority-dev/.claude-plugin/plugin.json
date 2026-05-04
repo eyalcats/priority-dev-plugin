@@ -1,6 +1,6 @@
 {
   "name": "priority-dev",
-  "version": "1.11.6",
+  "version": "1.12.0",
   "description": "Priority ERP development tools for Claude Code — skill, agents, commands, and hooks for the Priority VSCode bridge",
   "skills": "./skills/",
   "commands": "./commands/",
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/nudge-priority-sdk.js",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/gotcha-injector.js",
             "timeout": 5
           }
         ]

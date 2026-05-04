@@ -10,14 +10,9 @@
 const { matchesPriorityPrompt } = require('./lib/priority-keywords');
 const { getMandateEmitted, setMandateEmitted } = require('./lib/freshness-state');
 
-const MANDATE = [
-  'Before answering this Priority question, you MUST:',
-  '  1. Identify which priority-sdk/references/*.md applies and read it.',
-  '  2. Grep priority-sdk/examples/ for similar patterns.',
-  '  3. Search live Priority code via run_inline_sqli on CODEREF, FORMCLMNS,',
-  '     FORMTRIG for canonical examples actually running in the system.',
-  'Do NOT answer from memory. Cite what you read.',
-].join('\n');
+const MANDATE =
+  'Priority work — invoke /priority-sdk if not already invoked this session. ' +
+  'The skill tells you which references and examples to consult for this task.';
 
 (async function main() {
   let payload = {};

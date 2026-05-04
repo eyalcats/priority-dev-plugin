@@ -40,6 +40,27 @@ If a tool fails: diagnose the bridge or pick an alternative tool. Do not fall ba
 - `get_current_file` returns `null` — ask the user to open the target file before any work proceeds.
 - The user has explicitly asked to do the step themselves.
 
+## Inspection — 1-call shapes (use these BEFORE WebSDK navigation)
+
+When you want to READ existing Priority data — proc steps, trigger code, column expressions, form metadata — prefer a single `run_inline_sqli` SELECT against the real backing table over a multi-op `websdk_form_action` chain. WebSDK navigation is required only for writes and for subforms with no real backing table.
+
+| Want to read… | Single call |
+|---|---|
+| Find a form's EXEC id | `SELECT EXEC FROM EXEC WHERE ENAME=':form' FORMAT;` |
+| Resolve form → table | `SELECT EFORM,TNAME FROM EFORM WHERE ENAME=':form' FORMAT;` |
+| List form columns | `SELECT NAME,POS,HIDE,IDCOLUMN,IDJOIN,EXPRESSION FROM FORMCLMNS WHERE FORM=:id ORDER BY POS FORMAT;` |
+| All forms using a column | `SELECT FORM,NAME FROM FORMCLMNS WHERE NAME=':col' FORMAT;` |
+| Form column expression | `SELECT EXPR FROM FORMCLMNSA WHERE FORM=:id AND NAME=':col' FORMAT;` |
+| List form-level triggers | `SELECT TRIG,NAME FROM FORMTRIG WHERE FORM=:id ORDER BY TRIG FORMAT;` |
+| Form-level trigger code | `SELECT TEXT FROM FORMTRIGTEXT WHERE FORM=:id AND TRIG=:t ORDER BY TEXTLINE FORMAT;` |
+| Column-level trigger code | `SELECT TEXT FROM FORMCLTRIGTEXT WHERE FORM=:id AND NAME=':col' AND TRIG=:t ORDER BY TEXTLINE FORMAT;` |
+| List a procedure's steps | WebSDK only — `EPROG filter ENAME → setActiveRow → startSubForm PROG → getRows`. Raw `SELECT FROM PROG` fails (subform alias). |
+| Procedure step SQLI text | `SELECT TEXT FROM PROCQUERYTEXT WHERE EPROG=:id AND POS=:p ORDER BY TEXTLINE FORMAT;` |
+
+**Subform-vs-table cheat:** `PROG`, `PROGTEXT`, `FCLMN`, `FLINK`, `FORMEXEC`, `FTRIG`, `FORMPREPERRS`, `FCLMNA` are EFORM/EPROG **subforms** — never legal in raw `SELECT FROM`. Real backing tables: `PROCSTEPS`, `PROCQUERYTEXT`, `FORMCLMNS`, `FORMLINKS`, `FORMEXEC`, `FORMTRIG`, the FORMPREPERRS row table, `FORMCLMNSA`. Built-in procedure steps (`ETYPE='B'`) have no PROGTEXT — only `ETYPE='C'` (SQLI), `INPUT`, `CHOOSE`, `HTML` do.
+
+**EFORM-view aliases:** `HIDEBOOL` / `IDCOLUMNE` / `IDJOINE` are EFORM view names. The real columns in `FORMCLMNS` are `HIDE` / `IDCOLUMN` / `IDJOIN`. Use the view names only inside `websdk_form_action`; use the real names in raw SQLI.
+
 ## Core Concepts
 
 Priority uses a proprietary SQL dialect (SQLI) that extends standard SQL with custom functions, variables, flow control, and execution commands. All development happens through generators accessible via `System Management > Generators`.
@@ -209,121 +230,4 @@ WRNMSG 1 WHERE :$.FIELD = '';    /* Warn but allow save */
 | **`examples/webservice-examples.sql`** | WSCLIENT, XMLPARSE, JSONPARSE, SFTPCLNT, FILTER |
 | **`examples/websdk-examples.js`** | Web SDK JavaScript: connection, PAT auth, forms, procedures, reports, search/filter |
 
-## Quick Reference: Common Tasks
-
-### Validate a field value
-Read `references/triggers.md` > CHECK-FIELD section, then see `examples/trigger-examples.sql`.
-
-### Create a new form with triggers
-Read `references/forms.md` for form setup, then `references/triggers.md` for trigger creation. Use `examples/trigger-examples.sql` for patterns.
-
-### Write a procedure with user input
-Read `references/procedures.md` > User Input section, then see `examples/procedure-examples.sql`.
-
-### Copy a procedure / report / form / interface
-Do **not** rebuild the entity by hand. Use the `copyEntity` compound op on `websdk_form_action`:
-```json
-{"operations": [{"op": "copyEntity", "kind": "proc"|"report"|"form"|"interface", "source": "<SRC>", "target": "<TGT>"}]}
-```
-The compound maps `kind` to `COPYPROG` / `COPYREP` / `COPYFORM` / `COPYINTER` and drives `priority.procStart` + `inputFields` with both fields (source, target) in a single call — that's the only call shape that actually completes the copy. Read `references/procedures.md` > "Copying existing entities" for the gotcha and manual-invocation fallbacks (UI / `WINPROC -P`).
-
-### Generate a document (PDF/print)
-Read `references/documents.md` > WINHTML section, then see `examples/procedure-examples.sql` for WINHTML patterns.
-
-### Load data via interface
-Read `references/interfaces.md` > Load Table Pattern and Form Load Execution sections, then see `examples/interface-examples.sql`.
-
-### Call a REST API
-Read `references/integrations.md` > WSCLIENT section, then see `examples/webservice-examples.sql`.
-
-### Parse XML or JSON response
-Read `references/integrations.md` > XML/JSON Parsing sections, then see `examples/webservice-examples.sql`.
-
-### Debug a form or procedure
-Read `references/debugging.md` > Debug Tools section for the `-trc` flag syntax.
-
-### Triage a compile error (`prepareForm` fails, or "Prepare All Forms" lists errors)
-Read `references/compile-debugging.md`. It decodes the `FORM/COLUMN/STEP` error path, classifies the error by root cause, and gives a paste-ready triage query + fix recipe for each class. For automated triage, invoke `/compile-doctor ENTITY [ENTITY...]` — spawns `compile-doctor` subagents that diagnose and fix in a chain-aware loop.
-
-### Create a table with DBI
-Read `references/tables-and-dbi.md` > DBI Syntax section, then see `examples/sql-patterns.sql`.
-
-### Transfer files via SFTP
-Read `references/integrations.md` > SFTP section, then see `examples/webservice-examples.sql`.
-
-### Run external programs (WINAPP/WINRUN) or copy/move/delete files
-Read `references/integrations.md` > External Program Invocation for WINAPP/WINRUN/SHELLEX, or `references/file-operations.md` > File Management Utilities for COPYFILE/MOVEFILE/DELWINDOW.
-
-### Use semaphores, dynamic SQL, or run a procedure/report from SQLI
-Read `references/advanced-sqli.md` — procs/reports via WINACTIV/ACTIVATE/ACTIVATF, Dynamic SQL, LASTS-table and time-based semaphores.
-
-### Encrypt data, print attachments, or base64-encode a file
-Read `references/file-operations.md` — CRPTUTIL for encryption, PREXFILE for attachments, FILTER > Base64 section.
-
-### Connect via Web SDK (JavaScript)
-Read `references/web-cloud-dashboards.md` > Web SDK Common Issues section, then see `examples/websdk-examples.js`.
-
-### Read, write, and compile code via Claude Code MCP
-Read `references/vscode-bridge-examples.md` for tool usage examples and common workflows. For architecture and troubleshooting, see `references/debugging.md` > Claude Code MCP Integration.
-
-### Scaffold new triggers or procedure steps via Claude Code
-Read `references/vscode-bridge-examples.md` > Scaffolding New Code section — uses `run_windbi_command` with `createFormTrigger`, `createProcedureStep`, etc.
-
-### Inspect entity structure (dump, table columns) via Claude Code
-Read `references/vscode-bridge-examples.md` > Inspecting Entities section — uses `run_windbi_command` with `dumpForm`, `displayTableColumns`, etc.
-
-### Generate an upgrade shell / pick the right UPGCODE
-Read `references/deployment.md` > "Choosing the right UPGCODE", then use the `generate_shell` MCP tool. For custom columns on system tables, see "DBI in UPGNOTES for system-table columns".
-
-### Look up why something isn't working
-Read `references/common-mistakes.md` — fast anti-pattern catalog with pointers to the canonical reference for each symptom.
-
-## Search Patterns
-
-To find specific content in reference files, search for these patterns:
-
-| Topic | Search Pattern | File |
-|-------|---------------|------|
-| System variables | `SQL.` or `:$` | `references/sql-core.md` |
-| Date functions | `ATOD\|DTOA\|DAYS\|ADDDATE` | `references/sql-core.md` |
-| String functions | `STRCAT\|SUBSTR\|STRIND\|ITOA` | `references/sql-core.md` |
-| Trigger types | `CHECK-FIELD\|POST-FIELD\|PRE-INSERT` | `references/triggers.md` |
-| ERRMSG/WRNMSG | `ERRMSG\|WRNMSG` | `references/triggers.md` |
-| MAILMSG | `MAILMSG` | `references/triggers.md` |
-| WINHTML | `WINHTML\|-d\|-dQ` | `references/documents.md` |
-| Interface params | `EXECUTE INTERFACE` | `references/interfaces.md` |
-| GENERALLOAD | `GENERALLOAD` | `references/interfaces.md` |
-| WSCLIENT | `WSCLIENT` | `references/integrations.md` |
-| JSON body for WSCLIENT | `JSON.*body\|ASCII.*BODYFILE\|STRCAT.*JSON` | `references/integrations.md`, `examples/webservice-examples.sql` |
-| XMLPARSE | `XMLPARSE\|JSONPARSE` | `references/integrations.md` |
-| SFTPCLNT | `SFTPCLNT` | `references/integrations.md` |
-| WINAPP / WINRUN / SHELLEX | `WINAPP\|WINRUN\|SHELLEX` | `references/integrations.md` |
-| COPYFILE / MOVEFILE / FILELIST / FILTER | `COPYFILE\|MOVEFILE\|FILELIST\|EXECUTE FILTER` | `references/file-operations.md` |
-| CRPTUTIL (encryption) | `CRPTUTIL` | `references/file-operations.md` |
-| PREXFILE (print attachments) | `PREXFILE` | `references/file-operations.md` |
-| Dynamic SQL / Semaphores | `EXECUTE SQLI\|LASTS` | `references/advanced-sqli.md` |
-| Run proc/report from SQLI | `ACTIVATF\|WINACTIV\|ACTIVATE` | `references/advanced-sqli.md` |
-| Debug | `-trc\|DEBUGSQL\|HEAVYQUERY` | `references/debugging.md` |
-| Compile errors (FORMPREPERRS triage) | `parse error at or near symbol ;\|FORM/COL/EXPR\|orphan-expression\|missing-column-ref\|compile-doctor` | `references/compile-debugging.md` |
-| Dashboard | `WINHTMLH\|HTMLCURSOR` | `references/web-cloud-dashboards.md` |
-| Web SDK | `CORS\|Connection\|PAT\|reportOptions\|getRows\|displayURL` | `references/web-cloud-dashboards.md` |
-| HEBCONV | `HEBCONV\|CLR\|hebutils` | `references/sql-core.md` |
-| ODBC | `ODBC\|priodbc` | `references/interfaces.md` |
-| VSCode bridge | `get_current_file\|write_to_editor\|run_windbi_command` | `references/vscode-bridge-examples.md` |
-| WebSDK operations | `websdk_form_action\|startSubForm\|getRows\|fieldUpdate\|EFORM` | `references/websdk-cookbook.md` |
-| WebSDK search/filter | `LIKE\|operator\|choose\|setSearchFilter\|clearFilter\|search` | `references/websdk-cookbook.md` |
-| Form metadata tables | `FORMCLMNS\|FORMTRIG\|FORMCLTRIGTEXT\|HIDEBOOL\|HIDE` | `references/websdk-cookbook.md` |
-| Text subform recipe (6-call) | `Text Subform Creation\|TEXTFORM\|EDES.*LOG\|FCLMNA.*EXPR` | `references/websdk-cookbook.md` |
-| Find form internal ID | `Find a form's internal ID\|EXEC FROM EXEC` | `references/websdk-cookbook.md` |
-| Copy entity (proc/report/form/interface) | `COPYPROG\|COPYREP\|COPYFORM\|COPYINTER\|WINPROC -P` | `references/procedures.md` |
-| Generator-form ENAMEs | `EPROG\|EREP\|EFORM\|EINTER\|Canonical generator-form names` | `references/websdk-cookbook.md` |
-| SELECT prints nothing | `Output Formats for SELECT\|FORMAT;\|Execution ok` | `references/sql-core.md`, `references/common-mistakes.md` |
-| Unfiltered getRows empty / bridge sees nothing | `Unfiltered .getRows. returns empty\|session or tenant\|Logging in to url` | `references/common-mistakes.md`, memory `feedback_verify_bridge_tenant_before_debug.md` |
-| Subagent hallucinated a result | `Done .0 tool uses\|subagent summary\|unverified` | `references/common-mistakes.md` |
-| Upgrade shells / UPGCODE | `UPGCODE\|TAKESINGLEENT\|TAKETRIG\|TAKEFORMCOL\|UPGNOTES\|TAKEUPGRADE\|DOWNLOADUPG\|generate_shell` | `references/deployment.md` |
-| Direct activations | `FORMEXEC\|:\$\.PAR\|direct activation\|LINK.*TO.*:\$\.PAR` | `references/procedures.md`, `references/deployment.md` |
-| EDI internals | `INTERFORMS\|INTERCLMNSFILE\|EINTER\|INTERFACE.*-form` | `references/interfaces.md` |
-| Known bridge behaviors | `QueryValues\|setSearchFilter\|runSqliFile\|FORMCLTRIGTEXT.*append\|FCLMNA.*scalar` | `references/websdk-cookbook.md` |
-| Anti-patterns / why doesn't X work | `Wrong:\|Right:\|See:\|common mistake` | `references/common-mistakes.md` |
-| MCP tools | `priority-dev\|priority-gateway\|bridge` | `references/debugging.md`, `references/vscode-bridge-examples.md` |
-| Scaffold | `createFormTrigger\|createProcedureStep` | `references/vscode-bridge-examples.md` |
+For full-text search patterns across reference files, see `references/_index.md`.
