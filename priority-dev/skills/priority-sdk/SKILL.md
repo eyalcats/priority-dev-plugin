@@ -25,6 +25,21 @@ Reference skill for writing, debugging, and maintaining code in the Priority ERP
 
 For installation instructions, see `references/installation.md`.
 
+## Standing rules
+
+### Tool autonomy: never delegate work the bridge can do
+
+If a Priority operation can be performed via `websdk_form_action`, `run_inline_sqli`, `run_windbi_command`, `open_priority_file`, `write_to_editor`, or `refresh_editor` — perform it. Do **not** ask the user to "open a file in VSCode", "run a command in WINDBI", "execute this DBI", "compile this form", "save the file", "check the WINDBI panel", or "paste the code back to me". The bridge exists so you can do these autonomously.
+
+If a tool fails: diagnose the bridge or pick an alternative tool. Do not fall back to manual delegation. See `references/vscode-bridge-examples.md` § "Intent → tool" for the reverse index.
+
+**Allowed exceptions** — manual delegation IS correct here:
+
+- VSIX install / VSCode reload — admin actions outside the bridge's scope. On Windows, do **not** invoke the `code` CLI from shell (it spawns a new VSCode instance and disrupts the running bridge). Ask the user to install via VSCode's command palette.
+- Browser-only auth flows (e.g., FileSmile download on cloud Priority servers).
+- `get_current_file` returns `null` — ask the user to open the target file before any work proceeds.
+- The user has explicitly asked to do the step themselves.
+
 ## Core Concepts
 
 Priority uses a proprietary SQL dialect (SQLI) that extends standard SQL with custom functions, variables, flow control, and execution commands. All development happens through generators accessible via `System Management > Generators`.

@@ -2,6 +2,15 @@
 
 Flat catalog of anti-patterns that past sessions have wasted time on. Each entry names the symptom, the wrong approach, the right approach, and points at the canonical reference. Use as a quick "why isn't X working" lookup before retrying a pattern.
 
+## Workflow / autonomy
+
+### Asking the user to run a Priority command (open file in VSCode, run DBI, compile, check WINDBI panel)
+- **Symptom:** Output to the user contains "please open this in VSCode" / "run this DBI in WINDBI" / "save this to a `.pq` file" / "compile the form for me" / "check the WINDBI panel for errors" / "paste the code back to me".
+- **Wrong:** Manual delegation when a bridge tool exists. The model defaults to "ask the user" when uncertain or when a tool fails — instead of diagnosing the bridge or picking an alternative.
+- **Right:** Use the bridge tool. The intent → tool reverse index lives in `vscode-bridge-examples.md` § "Intent → tool". If the chosen tool fails, diagnose or pick another — do not fall back to manual delegation.
+- **Allowed exceptions:** VSIX install / VSCode reload, browser-only auth, `get_current_file` returning `null`, or when the user explicitly asked to do the step themselves.
+- **See:** `SKILL.md` § "Standing rules: Tool autonomy", `vscode-bridge-examples.md` § "Intent → tool".
+
 ## Form / column management
 
 ### Using CHOOSE-FIELD for "after user picked" logic

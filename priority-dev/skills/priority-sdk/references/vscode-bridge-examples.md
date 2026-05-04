@@ -4,6 +4,31 @@
 
 > **Setup:** If the bridge isn't installed yet, run `claude plugin marketplace add eyalcats/priority-dev-plugin && claude plugin install priority-dev`. See `SKILL.md` > Installation for details.
 
+## Intent → tool
+
+Reverse index from "I need to do X" to the bridge tool that does it. If the action you need is in the left column, the right column shows the tool — and the manual-delegation phrase you must NOT emit. The standing rule (`SKILL.md` § "Standing rules: Tool autonomy") forbids manual delegation when one of these tools applies.
+
+| If you want to… | Use this — NOT this |
+|---|---|
+| Read the active editor buffer | `get_current_file` — not "please paste the code" |
+| Open a Priority file in the editor | `open_priority_file` — not "please open ENTITY in VSCode" |
+| Write SQLI to a step | `write_to_editor` — not "please paste this into VSCode" |
+| Reload from server | `refresh_editor` — not "please refresh manually" |
+| Run an ad-hoc SQLI query | `run_inline_sqli` (mode=`sqli`) — not "please run this in WINDBI" |
+| Run a DBI block | `run_inline_sqli` (mode=`dbi`) — not "save to a `.pq` and run `priority.executeDbi`" |
+| Compile a form | `websdk_form_action` compound `compile` op — not "please run prepareForm in WINDBI" |
+| Compile a procedure | `run_windbi_command priority.prepareProc` — not "please compile manually" |
+| Read compile errors | `run_inline_sqli` against `PREPERRMSGS` (authoritative; see `compile-debugging.md`) — not "please check the WINDBI panel" |
+| Read form / column / trigger metadata | `websdk_form_action` on EFORM (subforms FCLMN / FTRIG / FLINK), or SQLI against `FORMCLMNS` / `FORMTRIG` / `FORMCLTRIGTEXT` — not "please show me the definition" |
+| Inspect table structure | `run_inline_sqli` on `COLUMNS WHERE TNAME='X' FORMAT;` — not "please tell me the columns" (avoid `priority.displayTableColumns` — see `common-mistakes.md` § Debugging) |
+| Search code across forms | `run_inline_sqli` on `CODEREF` / `FORMTRIGTEXT` / `FORMCLTRIGTEXT` — not "please grep for me" |
+| Find a form's internal ID | `run_inline_sqli` on `EXEC` — not "please look it up" |
+| Generate an upgrade shell | `generate_shell` MCP tool — not "please build the .sh by hand" |
+| Update a form row (data) | `websdk_form_action` `fieldUpdate` / `saveRow` — not "please update it in the UI" |
+| Run a procedure / interface | `websdk_form_action` `procStart` (or `EXECUTE INTERFACE` via `run_inline_sqli`) — not "please run it from the menu" |
+
+The carved-out exceptions where manual delegation IS correct (VSIX install, browser-only auth, null `get_current_file`, explicit user request) are listed in `SKILL.md` § "Standing rules: Tool autonomy".
+
 ## Architecture
 
 ```
