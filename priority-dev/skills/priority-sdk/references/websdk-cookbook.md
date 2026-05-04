@@ -1264,6 +1264,57 @@ FORMAT;
 
 ---
 
+## Procedure body editing
+
+### Recipe: Write a procedure body via WebSDK PROGTEXT (alternative to `write_to_editor`)
+
+Use this when you can't or don't want to `open_priority_file` first — e.g., automated procedure authorship without an active VSCode editor tab. Slower than `write_to_editor` (one round-trip per body line vs one round-trip total) but has no editor-state dependency.
+
+**Precondition:** the procedure entity already exists with at least one PROG (step) row, created via the **UI duplicate path** described in § "WebSDK `newRow` on EPROG produces procedures that silently never execute" above. Body writes via WebSDK on a properly-created entity execute correctly; body writes on a `newRow`-created entity hit the same silent-fail bug regardless of how the body lines were populated.
+
+**Steps:**
+
+1. Open EPROG and navigate to the procedure:
+   ```
+   websdk EPROG → filter ENAME='<procname>' → setActiveRow(1)
+   ```
+   ⚠ Do **not** use `search` on EPROG — it corrupts form state and prevents subform entry on the same row. Use `filter` + `setActiveRow`.
+
+2. Open the step subform and pick the target step:
+   ```
+   startSubForm('PROG') → getRows(N) → setActiveRow(<n>)
+   ```
+   Step rows are typically POS=5, 10, 15, …; pick by row index, not by POS value.
+
+3. Open the body-text subform:
+   ```
+   startSubForm('PROGTEXT')
+   ```
+   Underlying table: `PROGRAMSTEXT`.
+
+4. Write each non-empty line:
+   ```
+   newRow → fieldUpdate('TEXT', '<line content>') → saveRow
+   ```
+   - `saveRow` rejects empty TEXT — skip blank lines, or pass `stopOnError: false` if iterating an array that may include blanks.
+   - Hebrew via `fieldUpdate('TEXT', …)` silently fails to persist. Use `ENTMESSAGE` for non-ASCII content, or fall back to `write_to_editor` (which handles UTF-8 correctly).
+   - WebSDK `fieldUpdate` handles single quotes natively — no escaping needed (unlike `run_inline_sqli` SQLI mode).
+
+5. Compile:
+   ```
+   run_windbi_command('priority.prepareProc', { entityName: '<procname>' })
+   ```
+   Read `PREPERRMSGS` (authoritative) per § "Compile-status signals: PREPERRMSGS is authoritative".
+
+**When to prefer `write_to_editor` instead:**
+- Body contains non-ASCII content (Hebrew, etc.).
+- Body has many lines and a VSCode session is available — `write_to_editor` is one round-trip vs N for the PROGTEXT path.
+- You already called `open_priority_file` on the procedure step.
+
+**Verified 2026-05-04 on `TGML_INITSEED` (EXEC=84209, parameterless, lp1378 demo):** 35 body lines written via WebSDK PROGTEXT; `prepareProc` clean; full TAKEUPGRADE + DOWNLOADUPG + INSTITLE round-trip on customer succeeded; procedure executed correctly. Cross-reference: this recipe complements (does not contradict) the line-1246 warning — that warning is about *creating* the entity via `newRow`; this recipe is about writing body content into an already-properly-created entity.
+
+---
+
 ## Entity deletion
 
 ### Procedure deletion requires child-first ordering
