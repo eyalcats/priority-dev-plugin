@@ -134,7 +134,11 @@ Follow the same naming rules as report names (alphanumeric + underline, begins w
 
 Each column is identified by a unique **column number** assigned automatically. Use this number to reference the column in expressions.
 
-For custom columns, manually assign a column number **>= 500** to prevent conflicts with future Priority releases.
+For custom columns, manually assign a column number **greater than 500** (i.e., 501 or higher) to prevent conflicts with future Priority releases.
+
+> **Note:** The handbook specifies strictly `> 500`; using column number 500 itself may conflict with a system-reserved slot. `tables-and-dbi.md` already states "greater than 500" for the same rule.
+
+*(seen in: handbook:Reports@page-21)*
 
 ### Join Columns
 
@@ -231,6 +235,14 @@ Hidden columns can still be used for sorting, joins, and expressions.
 
 Flag the **Input** column to include a column in the parameter input screen. For Boolean (Y/N) checkbox input, also specify `B` in the **Don't Display 0 Val** column (CHAR column with width of 1 only).
 
+### CHOOSE-FIELD and SEARCH-FIELD Triggers for Report Input Columns
+
+When a column is flagged as an **Input** column, if the column's target form has CHOOSE-FIELD or SEARCH-FIELD triggers, those triggers are **automatically imported** to the report input screen.
+
+To write a report-specific CHOOSE-FIELD or SEARCH-FIELD trigger (overriding the form trigger or adding one when no target form exists), use the **Field Triggers** sub-level of the Report Columns form. The same trigger-naming restrictions that apply to form triggers apply here (see `references/triggers.md §Trigger Naming Conventions`).
+
+*(seen in: handbook:Reports@page-142)*
+
 ### Predefined Query Conditions
 
 Use the **Expression/Condition** column of the Report Column Extension form to set permanent query conditions:
@@ -288,6 +300,20 @@ In the Picture tab of Report Columns-HTML Design:
 - Unicode file limit: 1663 characters
 
 For unicode QR (`q`), set the column contents to the unicode text file to encode. State the file explicitly or as a variable from the printing program.
+
+> **22.0+ migration note:** Prior to version 22.0, some printing programs used `EXECUTE QRCODE` as a custom bypass to exceed the width limit on QR codes defined as `Q` in the Picture field. This bypass is no longer supported as of version 22.0. To locate programs still using the old bypass:
+>
+> ```sql
+> SELECT E.ENAME, E.TITLE, P.POS, PT.TEXT, PT.TEXTORD, E.TYPE
+> FROM PROGRAMSTEXT PT, PROGRAMS P, EXEC E
+> WHERE PT.TEXT LIKE '%EXECUTE QRCODE%'
+> AND PT.PROG = P.PROG
+> AND P.EXEC = E.EXEC
+> ORDER BY 1, 3, 5
+> FORMAT;
+> ```
+
+*(seen in: handbook:Reports@page-143)*
 
 ---
 
@@ -413,6 +439,22 @@ Common pairings: `FFUNC='S'` + `FSUBTOTAL='B'` = running subtotals at
 every break; `FFUNC='S'` + `FSUBTOTAL='T'` = grand total only.
 
 *(seen in: TRIAL_BALANCE, INV_SALESPROFITPART, OPENCUSTORDERS)*
+
+### Financial Reports: Distinguishing Credit and Debit Balances
+
+When displaying financial balances (e.g., General Ledger), parentheses are used to distinguish credit from debit. The **CREDITBAL** system constant controls which side is enclosed in parentheses — but parentheses only appear on columns flagged as **financial balance columns** (set the relevant flag on the report column).
+
+To activate credit-balance-in-parentheses mode:
+
+```sql
+INSERT INTO SYSCONST (NAME, VALUE) VALUES ('CREDITBAL', 1);
+```
+
+By default, debit balances appear in parentheses. After inserting `CREDITBAL=1`, credit balances appear in parentheses instead (applies to both forms and reports).
+
+> **Warning:** Do not flag a CHAR-type column as a financial balance column if the report will be exported to Excel. Excel cannot interpret the parenthesized value and outputs a blank worksheet.
+
+*(seen in: handbook:Reports@page-146)*
 
 ---
 
@@ -827,6 +869,35 @@ Use the **Run Report** program (Reports menu) or the **Run Report/Procedure** pr
 
 When activated from a form, input is restricted to the form record on which the cursor rests. Only columns from the form's base table serve as input.
 
+### From an SQLI Step or Procedure
+
+Reports can only be run programmatically via `WINACTIV` (Windows client only) or `ACTIVATF` (cross-platform, same process). Use a linked file to pass the record context:
+
+```sql
+:F = '../../output.txt';
+SELECT SQL.TMPFILE INTO :CST FROM DUMMY;
+
+LINK CUSTOMERS TO :CST;
+GOTO 299 WHERE :RETVAL <= 0;
+
+INSERT INTO CUSTOMERS
+SELECT * FROM CUSTOMERS O
+WHERE CUSTNAME = '250';
+
+UNLINK CUSTOMERS;
+EXECUTE WINACTIV '-R', 'OPENORDIBYDOER', 'CUSTOMERS', :CST;
+
+LABEL 299;
+```
+
+For email/file output from `WINACTIV`, additional flags are available:
+- `-u` (Priority user), `-g` (group), `-e` (external email address)
+- `-x` (tab-delimited text output), `-X` (Excel output, filename without suffix)
+
+See `references/advanced-sqli.md §Run Procedure/Report from SQLI` for full WINACTIV/ACTIVATE/ACTIVATF syntax and web-interface compatibility notes.
+
+*(seen in: handbook:Reports@page-293)*
+
 ---
 
 ## User Report Generators
@@ -891,3 +962,41 @@ Adding columns to an existing standard generator still requires copying all thre
 2. Copy the standard **form** that shares the base-report name (e.g., `INVOICEREP` → `XXXX_INVOICEREP`) and revise the copy following the `ASSETREP` steps above (PRE-FORM trigger, ENAME/TITLE POST-FIELD triggers, `LIKE` expression, `GREPCLMNS` sub-level).
 3. Copy the matching **`RUN*REP` procedure** (e.g., `RUNINVOICEREP` → `XXXX_RUNINVOICEREP`). In the SQLI query line, set `:TYPE = 'r'; :PAT = 'XXX';` (where `XXX` is the prefix assigned in step 2) and change the report name in the last procedure step.
 4. Link the new form and procedure to the relevant menu.
+
+---
+
+## BI Reports
+
+BI (Business Intelligence) cube reports are powered by the `EISCUBES` table. To create or modify one, copy and revise three sets of standard entities. **Note:** the `TYPE` column in `EISCUBES` has a maximum width of 12 — keep your `:TYPE` variable value under 12 characters.
+
+### Copy the Data-Preparation Procedures
+
+1. Copy `PREPORDERSCUBE` → `PRIV_PREPORDERSCUBE` and `PREPORDERSCUBE1` → `PRIV_PREPORDERSCUBE1`.
+2. In `PRIV_PREPORDERSCUBE` step 20, change `PREPORDERSCUBE1` → `PRIV_PREPORDERSCUBE1`.
+3. In `PRIV_PREPORDERSCUBE1` step query:
+   - Change `:TYPE` from `'ORDERS'` to `'PRIV_ORDERS'` (max 12 chars).
+   - Change `:ENAME` to `'PRIV_EISORDERSREP'`.
+
+### Copy the BI Report
+
+1. Copy `EISORDERSREP` → `PRIV_EISORDERSREP`.
+2. In the **Report Column Extension** sub-level, change `TYPE` from `= 'ORDERS'` to `= 'PRIV_ORDERS'`.
+3. Drill-down options: flag relevant report columns as Input (`I`). Each must have a value in the **Group by** column.
+
+### Copy the Run Procedure
+
+1. Copy `EISORDERSREP` procedure → `PRIV_EISORDERSREP` (procedure, not the report entity).
+2. In step 70 SQLI, change `:ENAME` to `'PRIV_EISORDERSREP'`.
+3. In step 200, change the report name to `PRIV_EISORDERSREP`.
+4. Copy the base HTML page from `system\html` (and `system\html\lang.XX` if localised) to a new file name that matches your procedure's HTML step reference.
+
+### Column Display Rules
+
+A column is displayed in a BI report only if at least one condition holds:
+- The table name and column defined for the report column also appear in `EISCUBES`.
+- The column expression matches a column expression in `EISCUBES`.
+- The column title matches a column title in `EISCUBES`.
+
+> **Post-upgrade note:** If the custom BI report stops working after a system upgrade, re-copy the base HTML page from the standard BI procedure's `system\html` directory.
+
+*(seen in: handbook:Optimization@page-245-246)*

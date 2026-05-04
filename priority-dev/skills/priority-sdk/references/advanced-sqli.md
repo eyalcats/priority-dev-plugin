@@ -390,6 +390,32 @@ AND NUM < 0
 ORDER BY 2;
 ```
 
+### Full Column Setup
+
+The TRIGMSG join must be an **outer join** (`?` suffix on the join ID) because Word templates can be deleted — without it the form row disappears when a template is removed.
+
+| Form Column | Column | Table | Join | Notes |
+|---|---|---|---|---|
+| `PRIV_AWORD` | `PRIV_AWORD` | base table | 0 | INT; drives template selection |
+| `PRIV_MESSAGE` | `MESSAGE` | TRIGMSG | outer (e.g. `5?`) | Mark read-only |
+| `PRIV_EXEC` | `EXEC` | TRIGMSG | outer (e.g. `5?`) | Hide this column |
+
+**PRE-FORM trigger** (assigned to the `PRIV_EXEC` column):
+```sql
+:PRIV_EXEC = 0;
+SELECT EXEC INTO :PRIV_EXEC FROM EXEC WHERE ENAME = 'FORMNAME' AND TYPE = 'F';
+```
+Set Expression/Condition in Form Column Extension for `PRIV_EXEC` to `= :PRIV_EXEC` so the form's EXEC id is available for the CHECK-FIELD and CHOOSE-FIELD triggers.
+
+**POST-FIELD trigger** on `PRIV_AWORD`:
+```sql
+:$.PRIV_EXEC = :PRIV_EXEC;
+```
+
+Without the outer join on TRIGMSG, deleting any Word template causes the affected form row to vanish from the grid entirely.
+
+*(seen in: handbook:WSCLIENT@page-328)*
+
 ---
 
 ## Business Rules Generator
@@ -410,6 +436,74 @@ Custom form columns appear in the e-mail/SMS Choose list if they meet one of:
 | UGROUPS | GROUPNAME |
 
 The Business Rules Generator uses the corresponding e-mail/phone from the table (e.g., CUSTOMERS.EMAIL, USERSB.CELLPHONE). For USERS, the message goes to the associated employee. For UGROUPS, it goes to all group members.
+
+---
+
+## GANTT Charts (Gantt / Calendar / Group Schedule)
+
+Use the `GANTT` program to build interactive scheduling charts for resource scheduling (technicians, work orders, appointments). A GANTT procedure has two sections separated by an `END` step:
+
+- **Section 1:** INPUT/SQLI steps that build the LINK file, followed by a GANTT activation step with 21 positional parameters.
+- **Section 2:** Named SQLI query steps (all type `C`, execution order unimportant).
+
+### Three Chart Types
+
+| Type | X-axis | Y-axis |
+|---|---|---|
+| Gantt | Variable timeline | Employees/resources |
+| Calendar | 24-hour timeline | Days (main) + employees (sub) |
+| Group Schedule | 24-hour timeline | Employees (main) + days (sub) |
+
+### GANTT Activation Parameters (positional, Section 1)
+
+| # | Parameter |
+|---|---|
+| 1 | Procedure name (to retrieve Section 2 query steps) |
+| 2 | From Date |
+| 3 | To Date |
+| 4 | LINK file (linked employee/resource table; USERGANTT skips LINK) |
+| 5 | Linked table name |
+| 6 | Interface name (against GENERALLOAD, record type 1) |
+| 7 | Form for task details |
+| 8 | Form for employee details |
+| 9 | Permit revisions (0/1) |
+| 10 | Permit additions (0/1) |
+| 11 | Default display: 1=Gantt, 2=Calendar, 3=Group Schedule, 0=last used, 4=Cal or GS |
+| 12 | Selected task identifier |
+| 13 | Selected resource identifier |
+| 14–17 | Null placeholders |
+| 18 | OTHERID (available as `:OTHERID` in Section 2 queries) |
+| 19 | OTHERID2 |
+| 20 | Chart title |
+| 21 | Multi-company flag (0/1) |
+
+### Section 2 Named Query Steps
+
+| Step Name | Returns / Purpose |
+|---|---|
+| `RESOURCE` | Employee list (id, name, login, sort); vars: FROMDATE, TODATE |
+| `RESOURCE_DETAILS` | Employee details; var: RESOURCEID |
+| `TASKS` | Task list (id, resource, desc, from, to, target value, color); vars: FROMDATE, TODATE |
+| `TASK_DETAILS` | Task details; var: TASKID |
+| `TASK_TEXT` | Task text (TEXT, ORD); var: TASKID |
+| `TASK_INSERT` | Pre-fill form fields on new task; vars: RESOURCEID, TASKDATE, etc. |
+| `TASK_EDIT` | Dialog input fields (list GENERALLOAD target cols in a note); various vars |
+| `TASK_REFRESH` | Updated task display after edit (desc, target, from, to, color) |
+| `WORKHOURS` | Office hours per day (day, from, to); var: RESOURCEID |
+| `DAYSOFF` | Non-working days; var: CURDATE — returns 0 on holiday, fails on workday |
+| `RESOURCE_WORKHOURS` | Per-employee work hours (from/to date+time); replaces WORKHOURS+DAYSOFF |
+| `RELATIONS` | Task dependencies (predecessor, successor, color); manufacturing only |
+| `RESOURCE_CHOOSE` | Employee choose list |
+
+### GENERALLOAD Interface Fields (add/update task, record type 1)
+
+`INT1`=task id, `INT2`=resource id, `INT3`=from hour, `INT4`=to hour, `INT5`=previous resource id, `DATE1`=from date (DATE8), `DATE2`=to date (DATE8), `DATE3`=from date+time (DATE14), `DATE4`=to date+time (DATE14).
+
+### Reserved Messages
+
+Messages 1–20 are reserved for GANTT display titles. Custom field-title messages must use numbers `> 20`. Use `AS '#N'` in query `SELECT` aliases to bind a returned field to message number N.
+
+*(seen in: handbook:Form Triggers@page-275-285)*
 
 <!-- ADDED START -->
 

@@ -9,3 +9,4 @@
   reason: Already documented — references/forms.md §304-305 covers row-multiplication anti-pattern and IDJOIN>=6 fix. Refinement (probe max IDJOIN first) has only 1 source.
   source: PART form regression — TGML_PURFAM FK column with IDJOINE=6
 ---
+2026-05-03T00:00:00Z	4b96db41-b615-46a3-b68b-52b0d39ea514	missing	User-defined variable names limited to 50 characters (incl. company prefix)	already-documented: 50-character variable name limit is at plugin/skills/priority-sdk/references/forms.md line 817; auto-rejected by curator novelty gate during 2026-05-03 handbook-scan consolidate

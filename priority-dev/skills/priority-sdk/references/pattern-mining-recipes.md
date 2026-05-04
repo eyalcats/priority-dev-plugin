@@ -174,6 +174,36 @@ the SELECT and discards rows, leaving the bridge envelope showing only
 run_inline_sqli prints no rows" — and is the #1 cause of Scout
 under-harvest runs.
 
+## Discovery Tools
+
+### Table Generator Built-in Dictionaries
+
+The Tables Generator (System Management > Generators > Tables) provides read-only dictionaries and reports for inspecting existing tables without running DBI or WINDBI queries:
+
+| Name | Description |
+|------|-------------|
+| **Table Dictionary** | Lists all tables in the database; sub-levels show columns, keys, and key columns |
+| **Column Dictionary** | Displays attributes of all table columns across the database |
+| **Columns per Table** | Report listing all columns for each table |
+| **Keys per Table** | Report listing all keys for each table |
+
+*(seen in: handbook:Tables@page-36)*
+
+### SQL Interpreter Analysis Flags
+
+In the SQL Development (WINDBI) program (System Management > Generators > Procedures), run the SQL Interpreter (Execute > SQL interpreter). Prefix a query with these flags to get execution plans:
+
+| Flag | Output |
+|------|--------|
+| `+ optimizer` | Displays the steps of data retrieval |
+| `+ execution` | Displays retrieval steps AND number of records retrieved at each step |
+
+These are equivalent to query-plan / explain-analyze in standard SQL databases and are useful for diagnosing slow queries.
+
+**Permission required:** The `Authorized for SQL` column in the Personnel File (Human Resources menu) must be enabled for the user. `INSERT`/`UPDATE`/`DELETE` additionally require the **tabula** superuser group.
+
+*(seen in: handbook:Tables@page-43)*
+
 ## Tooling note — `:$` tokens inside LIKE patterns
 
 SQLI parses `:$` as a form-column variable reference, so `LIKE '%:$.FOO%'`

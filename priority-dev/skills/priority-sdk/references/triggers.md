@@ -204,6 +204,10 @@ Custom trigger names must:
 
 **SEARCH-FIELD exception:** Customized SEARCH-FIELD or SEARCH-ALL-FIELD triggers cannot be created. Only standard triggers are allowed.
 
+> **Registration required:** Before a custom trigger type name can be used, it must be added to the **List of Triggers** form (press F6 from the Row & Form Triggers form or the Form Column Triggers form). Numbered buffers (`BUF1`–`BUF19`) are pre-registered. Named buffers and any other custom trigger types must be added explicitly, or form preparation will fail with a "trigger name not found" error.
+
+*(seen in: handbook:Form Triggers@page-114)*
+
 **Column-level triggers:** Use the column name as the trigger name. The trigger type (CHECK-FIELD, POST-FIELD, etc.) is specified separately in the trigger declaration, not embedded in the name.
 
 <!-- ADDED START -->
@@ -939,6 +943,9 @@ If form preparation fails to replace the older version, use the `Reprepare Form`
 
 - **Entire report:** Help Text sub-level of Report Generator
 - **Input column:** Help Text sub-level of Report Columns
+- **Important:** Do **not** write help for a report that is activated from a procedure. Write the help on the **procedure** instead (Help Text sub-level of Procedure Generator). Writing help on both the report and its activating procedure leads to duplication and inconsistency.
+
+*(seen in: handbook:Forms@page-133)*
 
 ### Procedure Help
 
@@ -1159,3 +1166,35 @@ FROM DUMMY;
 ```
 
 *(seen in: TRANSORDER_P, FOBDOC, YINVOICES, WTASKITEMS, PRDISINGLE, PORDERITEMS, TRANSORDER_J, DOCUMENTS_P, PRDPART, DOCUMENTS_W, PRDITEMS via column-trigger scan on `FORMCLTRIGTEXT`)*
+
+---
+
+## BPM Patterns
+
+### CHOOSE-FIELD on STATDES — Arc-Filtered Status Picker
+
+In the BPM statuses form, add a CHOOSE-FIELD trigger on the `STATDES` column to show only statuses reachable from the current status per the BPM flow chart. Use `#INCLUDE STATUSARCS/EXP1` to inject the arc-filtering expression:
+
+```sql
+SELECT STATDES, '', ITOA(SORT, 3)
+FROM DOCSTATUSES
+WHERE TYPE = 'PRIV_MYBPM'
+AND
+#INCLUDE STATUSARCS/EXP1
+```
+
+`#INCLUDE STATUSARCS/EXP1` injects the runtime expression that restricts the list to statuses reachable from the current node per the BPM chart definition. Without it, the user sees all statuses instead of only the allowed transitions.
+
+*(seen in: handbook:Form Triggers@page-263)*
+
+### Multiple Forms Sharing a BPM Base Table
+
+If two or more forms share the same base table (e.g., `CUSTNOTES` and `CUSTNOTESA` are both based on the `CUSTNOTES` table), add a hidden column to each form that does **not** appear in the `DOCEXEC` column of `STATUSTYPES`:
+
+| Form Column Name | Column Type | Width | Expression |
+|---|---|---|---|
+| `STATMAILSTATUSTYPE` | CHAR | 1 | `'PRIV_MYBPM'` (the STATUSTYPE value) |
+
+Without this column, the BPM mail mechanism cannot identify the correct form when multiple forms share the same underlying table.
+
+*(seen in: handbook:Form Triggers@page-265)*

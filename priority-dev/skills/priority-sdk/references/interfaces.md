@@ -442,6 +442,8 @@ Accepted encodings: UTF-8, Unicode, UTF-16.
 
 ### XML Tags Structure
 
+> **Version note (23.0+):** The path-based XML tag syntax described below (`/root/element` and `/root/element>attribute`) was introduced in **Priority version 23.0**. Earlier versions used a different tag-mapping mechanism.
+
 XML tag definitions use a path-like syntax to specify node locations:
 
 ```
@@ -648,7 +650,7 @@ generated code.
 | `'-nl'` | Do not display line number in error report messages |
 | `'-nv'` | Hide column name and value in error messages from CHECK-FIELD trigger errors |
 | `'-noskip'` | Continue loading records of current record type after error (equivalent to Do Not Skip Lines column) |
-| `'-enforcebpm'` | Apply Business Rules Generator rules and run BPM mechanism during load. Without this flag: mail is sent, but all business rules/BPM rules are bypassed and defined paths are ignored |
+| `'-enforcebpm'` | Apply Business Rules Generator rules and run BPM mechanism during load. Without this flag: mail is sent, but all business rules/BPM rules are bypassed and defined paths are ignored. **Note:** Data Generator rules are NOT affected by this flag — they are activated elsewhere in the code (after POST-FIELD) regardless of whether `-enforcebpm` is specified. *(handbook §Interfaces p210)* |
 | `'-t'` | Indicate file has tab separators (when no file type defined in Form Load Designer). Use when file type is unknown in advance |
 | `'-W'` | Display warning messages in Load Errors report even if form load is defined to ignore warnings |
 | `'-m'` | Break up error messages into several lines |
@@ -1080,6 +1082,10 @@ RECORDTYPE dispatch is the architectural core of flat-file imports. The `LINE`/`
 
 Use ASCII or Unicode encoding for load files. Store them in `system\load` directory or sub-directories. Match the file name to the name defined in the Characteristics for Download form.
 
+> **Encoding note:** DBLOAD can **import** from ASCII or Unicode (UTF-16) files and auto-detects the format. However, data **exported** by DBLOAD is saved in **ASCII** format by default — unlike the INTERFACE program, which exports in Unicode (UTF-16) by default. Specify otherwise explicitly if Unicode output is required for downstream consumers.
+
+*(seen in: handbook:Interfaces@page-219)*
+
 Naming restrictions:
 - Up to 20 characters
 - Alphanumeric and underline only (no spaces)
@@ -1346,6 +1352,17 @@ Use any of these methods:
    - Search for `EXECUTE INTERFACE` or `EXECUTE DBLOAD`.
 
 4. Search for interface components by retrieving `LOAD*` in the various generators (forms, procedures, menus).
+
+### Exporting an Interface Definition to Another Server
+
+Once a form load (interface) is complete and tested, you can export its definition for deployment to another server (e.g., from a test environment to production):
+
+1. Navigate to the **Forms to be Loaded** sub-level form of the Form Load Designer.
+2. Run the **Upload Interface** program from the **Actions** list.
+
+This packages the interface definition for installation on the target server, similar to using revision shells for other entities.
+
+*(seen in: handbook:Interfaces@page-211)*
 
 ---
 

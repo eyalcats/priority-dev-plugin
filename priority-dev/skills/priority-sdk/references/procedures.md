@@ -170,6 +170,12 @@ Follow the same restrictions as report names: alphanumeric + underline, begins w
 
 Same as for reports. Specify **"Internal Development"** for custom procedures.
 
+### Help Date
+
+The **Help Date** column of the Procedure Generator is automatically updated whenever help messages are added or modified — whether for the entire procedure (via the Help Text sub-level) or for individual parameters. This provides a quick audit trail for documentation changes without opening the Help Text sub-levels.
+
+*(seen in: handbook:Procedures@page-133)*
+
 ---
 
 ## Procedure Steps
@@ -259,7 +265,7 @@ FORMAT;
 | `PRINTCONT` | Like PRINT, but offer Continue/Stop options (not displayed as Action) |
 | `PRINTCONTF` | Same as PRINTCONT, but display when run as Action |
 | `PRINTERR` | Display file contents as error and cause procedure failure; no effect if file is empty |
-| `SHOWCOPY` | Create a certified copy of a document. Take two parameters: document ID and document type |
+| `SHOWCOPY` | Create a certified copy of a document. Takes two parameters: document ID and document type (financial: IV and 'I'; inventory: DOC and 'D'). **Must be immediately followed by an END step and then a BACKGROUND step.** Without this sequence, the certified copy will not be saved correctly. See the `IVSHOWCOPY` procedure for the canonical pattern. *(handbook §Procedures p164)* |
 | `UPLOAD` | Upload a file to the server. Cannot be used with EXECUTE |
 | `DOWNLOAD` | Download a file from the server. Cannot be used with EXECUTE |
 | `URL` | Open a webpage from a web address stored in an ASCII file |
@@ -267,6 +273,30 @@ FORMAT;
 | `WRNMSGF` | Same as WRNMSG, but display when run as Action |
 
 Note: Commands ending in `F` are displayed when the procedure runs as an Action from a form; their counterparts without `F` are not.
+
+### Certified Copies: SENDOPTION Trigger Condition
+
+When a procedure saves a certified copy of a document, the copy is saved **only when the document is printed or sent by e-mail** — i.e., when `:SENDOPTION = 'PRINT'` or `'AMAIL'`. The three required steps are:
+
+1. Include an `HTMLEXTFILES` step to process attached files.
+2. In the first INPUT step, set `:HTMLPRINTORIG = 1`.
+3. In the SQLI step **after** the HTMLCURSOR step, set `:SAVECOPY = 1`.
+
+These variables are updated at runtime **per individual document**, so batch-printing across multiple records works correctly — each document's variables are set independently.
+
+For programmatic certified copy creation without an HTML procedure, see `SHOWCOPY` in the Basic Commands table above.
+
+*(seen in: handbook:Documents@page-189)*
+
+### Multiple Copies: DAYS Table Limit and Custom Table
+
+When a procedure generates multiple copies of a document using the `DAYS` table (DAYNUM 1–7) as a LINK source:
+
+- The `DAYS` table supports **up to 7 copies** (DAYNUM 1–7). For more than 7 copies, use a custom table — but the replacement table must contain a **fixed number of records** (like DAYS).
+- If the user also specifies a copy count at print time (e.g., 2), the total is the **product** of both values (e.g., `PRIV_NUMCOPIES = 3` × user's print copies = 2 = 6 total).
+- For documents restricted to one original (invoices, receipts), extra copies generated this way are still marked as copies — the single-original restriction is **not** overridden.
+
+*(seen in: handbook:Documents@page-182)*
 
 ---
 
@@ -381,13 +411,22 @@ PROGPARAM NAME=STD TITLE='Standard price' POS=20 HIDE=I EXPR='1'
 - The user's choice value is assigned to the first parameter
 
 **Method 2: CHOOSE query**
-Write in the **Step Query** sub-level of the CHOOSE/CHOOSEF step:
+Write in the **Step Query** sub-level of the CHOOSE/CHOOSEF step. **All three `SELECT` arguments must be of CHAR type.** Convert integers to strings with `ITOA()`:
+
 ```sql
-/* SQL query with three CHAR arguments in SELECT */
-/* Arg 1, Arg 2: displayed next to radio button */
-/* Arg 3: value assigned to the parameter */
-/* Use '' for Arg 2 to display single value */
+/* All three SELECT arguments must be CHAR type.
+   Convert integers to strings with ITOA: */
+SELECT STATDES, '', ITOA(MYDOCSTAT)
+FROM XXXX_MYDOCSTATS
+ORDER BY 2;
+/* Arg 1: label shown next to radio button
+   Arg 2: secondary label (use '' to show only Arg 1)
+   Arg 3: CHAR value assigned to the result parameter */
 ```
+
+Rules for the CHOOSE query are similar to those in CHOOSE-FIELD triggers. If numeric column values are passed without `ITOA()`, the query causes a runtime type error.
+
+*(seen in: handbook:Procedures@page-169)*
 
 ### Retrieve Records Into a Linked File
 
@@ -705,6 +744,38 @@ When run as Action, the form record on which the cursor rests is input into the 
 *   **Processing Sub-form Data:**
     To perform actions on all child records (e.g., printing labels for all lines in a 'Warehouse Transfer' based on an action at the header level), the procedure must be designed to explicitly query the sub-form table using the parent record ID passed into the `PAR` parameter.
 <!-- ADDED END -->
+### From an SQLI Step or Form Trigger
+
+Use `ACTIVATF` to invoke a procedure from within a form trigger or SQLI step (preferred for the web interface — runs in the same process as the calling code).
+
+**With a linked table** (the table is available via the `PAR` parameter inside the called procedure — enables Form Actions outside a form context):
+
+```sql
+SELECT SQL.TMPFILE INTO :FILE FROM DUMMY;
+LINK ORDERS TO :FILE;
+GOTO 299 WHERE :RETVAL <= 0;
+INSERT INTO ORDERS SELECT * FROM ORDERS O WHERE ORD = :$.ORD;
+UNLINK ORDERS;
+EXECUTE ACTIVATF '-P', 'OPENINVFORORDER', 'ORDERS', :FILE;
+LABEL 299;
+```
+
+**With external variables** (all received as CHAR inside the called procedure; access via `EXTERNAL` prefix):
+
+```sql
+EXECUTE ACTIVATF '-P', 'DEMO_MYPROC', '-var:MODE', 'UPDATE', '-var:QUANT', '500';
+```
+
+Inside `DEMO_MYPROC`, read as:
+```sql
+:DEMO_QUANT = ATOI(:EXTERNAL.QUANT);
+GOSUB 100 WHERE :EXTERNAL.MODE = 'UPDATE';
+```
+
+See `references/advanced-sqli.md §Run Procedure/Report from SQLI` for WINACTIV (Windows-only) and ACTIVATE (new process) alternatives.
+
+*(seen in: handbook:Procedures@page-292)*
+
 ### Run a Sub-Procedure
 
 Include a procedure as part of another via the **Procedure Link** form (sub-level of Procedure Generator). This is useful for reusing step sets across procedures.
@@ -765,3 +836,58 @@ When a directly activated procedure calls `EXECUTE INTERFACE '…', SQL.TMPFILE`
 Workaround: use the direct `INSERT` pattern above instead of `EXECUTE INTERFACE` for custom-table targets inside direct activations. For system tables, `EXECUTE INTERFACE` continues to work as expected.
 
 This is observed on custom tables specifically; system tables are unaffected. Verify against a live test before trusting it outside the observed case.
+
+---
+
+## HTML Procedures and Dashboards
+
+### MAXHTMLWIDTH System Constant
+
+The number of characters displayable in an HTML input column is determined by whichever is greater: the **report column's defined width** or the **`MAXHTMLWIDTH` system constant**. If content exceeds the visible width, the user can scroll within the input field. Set `MAXHTMLWIDTH` in the system constants form to control the visible character limit across all HTML input columns globally.
+
+*(seen in: handbook:Dashboards@page-250)*
+
+### :#N Column-Reference Syntax in Choose Queries
+
+In the **Field Triggers** form of a Report Column, a Choose query can reference other columns in the same report using `:#N` syntax, where `N` is the column number:
+
+```sql
+SELECT PARTDES, PART FROM PART
+WHERE CUSTPART = :#75
+```
+
+`:#75` is replaced at runtime with the current value of report column 75. The first retrieved value is displayed in the list; the second is returned to `:HTMLFIELD`. A third value (optional) is used for sorting only.
+
+*(seen in: handbook:Dashboards@page-251)*
+
+### DISPLAY Loop — Reading Back User Input from HTML Report Columns
+
+After an INPUT step resumes, use a `DISPLAY` loop to iterate over all input columns across all reports on the page. Each `DISPLAY` call fills `:HTMLACTION`, `:HTMLVALUE`, and `:HTMLFIELD` for one input column:
+
+```sql
+LABEL 1;
+DISPLAY;
+GOTO 2 WHERE :RETVAL <= 0;
+/* :HTMLACTION = column identifier string */
+/* :HTMLVALUE  = row-identifying value    */
+/* :HTMLFIELD  = value the user entered   */
+LOOP 1;
+LABEL 2;
+```
+
+Notes:
+- If multiple reports share the INPUT step, all their input columns are returned.
+- For a Multiple Choose or Multiple Check Box, each selection occupies a separate `:HTMLFIELD` value but shares a single `:HTMLACTION`.
+- `:HTMLACTION`, `:HTMLVALUE`, and `:HTMLFIELD` are documented in `references/sql-core.md` as single-line variable entries; this loop is the canonical way to populate them.
+
+*(seen in: handbook:Dashboards@page-253)*
+
+### Adding a Dashboard to Outlook and CRM Dashboards
+
+Finished Dashboard procedures can be surfaced in Microsoft Outlook:
+1. In Priority, go to **Mail > Mail Options > Outlook > Priority on Outlook**.
+2. Add the procedure. It appears under **Priority Dashboards** in the Shortcuts pane.
+
+**CRM Dashboards:** Set the **Application** column in the Procedure Generator to `CRM` (this is separate from the Rep/Wizard/Dashboard column value). CRM Dashboards appear under **Priority CRM** in the Outlook Shortcuts pane.
+
+*(seen in: handbook:Dashboards@page-258)*

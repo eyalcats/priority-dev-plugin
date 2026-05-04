@@ -130,6 +130,14 @@ To prevent users from defining a form as multi-company, specify `x` in the One-t
 | Tables participating in form | 78 |
 | Simultaneous form preparations | 25,000 |
 
+### Forms That Modify the USERS Table
+
+Any form whose triggers contain `INSERT INTO USERS` or `UPDATE USERS` statements is **automatically designated as read-only** for all users except members of the system administrator group (tabula users). Priority enforces this at compile time — no manual read-only flag is needed and the restriction cannot be overridden for non-admin users.
+
+**Implication:** Adding a trigger that writes to USERS on a previously writeable custom form causes that form to become read-only for ordinary users after the next compile. Test after every trigger change that touches the USERS table.
+
+*(seen in: handbook:Forms@page-21)*
+
 <!-- ADDED START -->
 ### Common Issues and Solutions
 
@@ -202,7 +210,15 @@ For financial balance display, distinguish between credit and debit:
 - **A** in Read/Mandatory/Bal column: Cumulative balance column -- record type (INT or REAL) in Form Column Extension, expression = `0` or `0.0`
 - **C** in Read/Mandatory/Bal column: Opening balance column
 
-Use the `CREDITBAL` system constant to control whether debit or credit balances appear in parentheses.
+Use the `CREDITBAL` system constant to control whether debit or credit balances appear in parentheses. By default, debit balances appear in parentheses. To enable credit-balance-in-parentheses mode globally (applies to both forms and reports):
+
+```sql
+INSERT INTO SYSCONST (NAME, VALUE) VALUES ('CREDITBAL', 1);
+```
+
+After inserting this row, credit balances appear in parentheses instead of debit balances.
+
+*(seen in: handbook:Forms@page-83)*
 
 ### Boolean Columns
 
@@ -360,6 +376,21 @@ The user interacts with the CHAR display column. Priority's web client shows a s
 - Put a plain INT column visible and attach a custom CHOOSE-FIELD trigger. No UI affordance will render and the trigger will never fire. This is the single most common mistake on Priority forms.
 - Try a scalar subquery as the display column's expression. Form expressions are scalar-only (see above).
 
+#### Exception: Updatable Imported Column
+
+When an imported column must be **editable in the form** (the user can update it and have the change persist in the source table), the setup differs from a standard read-only imported column:
+
+1. Do **NOT** specify a column name (`CNAME`) or table name (`TNAME`) on the FCLMN row.
+2. Do **NOT** specify a join column or join table on the FCLMN row.
+3. Instead, define the join in the **Form Column Extension** (FCLMNA) sub-level, the same way you record a calculated column.
+4. Leave the Read-only/Mandatory column **blank** (not `R`) so the column is editable.
+
+This is analogous to the calculated column pattern: the FCLMNA expression field defines the join target rather than a stored expression. The standard read-only rule (mark imported columns `R`) does **not** apply to this exception case.
+
+**Example:** The `STARTDATE` column in the Service Calls form (`DOCUMENTS_Q`).
+
+*(seen in: handbook:Forms@page-86)*
+
 #### Outer Joins
 
 Outer joins allow unmatched rows between base and join tables. Add a question mark (`?`) to:
@@ -367,6 +398,16 @@ Outer joins allow unmatched rows between base and join tables. Add a question ma
 - **Join ID** (e.g., `0?`) -- if the null record is in the join table
 
 Outer-joined tables are accessed **after** regular join tables.
+
+**Hard limit: maximum 10 outer joins per form** (marked with `?`). This total counts both existing standard outer joins and any added by custom development. Exceeding 10 will prevent the form from compiling. Always check how many standard outer joins the base form already has before adding custom ones.
+
+*(seen in: handbook:Forms@page-21)*
+
+**Chained outer joins:** When an outer-joined table is itself joined to a further table (a chain), the `?` mark must appear in **each** join ID along the chain, not only on the initial outer join. Omitting the `?` from a downstream join ID in the chain will cause unmatched rows to be silently dropped.
+
+Example: FNCITEMS to FNCITEMSB (outer join, `?` on join ID) to COSTCENTERS (also needs `?` on its join ID because FNCITEMSB is outer).
+
+*(seen in: handbook:Forms@page-87)*
 
 ### Calculated Columns
 
@@ -547,6 +588,9 @@ To refresh a form periodically:
 - Specify seconds between refreshes
 - Indicate whether to retrieve all records or only previously retrieved ones
 - Refresh works per node (does not affect sub-levels)
+- **Caution:** Enabling auto-refresh **disables the `TIMEOUT` system constant** for that form. Use sparingly — each refresh cycle accesses the server. If your form relies on TIMEOUT-based session logic, do not enable auto-refresh on that form.
+
+*(seen in: handbook:Forms@page-96)*
 
 **Other refresh methods:**
 - `REFRESH` command in a trigger (do NOT use in POST-UPDATE/POST-INSERT triggers with BPM charts)
