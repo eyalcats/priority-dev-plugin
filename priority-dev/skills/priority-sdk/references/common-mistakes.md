@@ -140,6 +140,53 @@ Flat catalog of anti-patterns that past sessions have wasted time on. Each entry
 - **Right:** Abbreviate in DBI; set the full title via `FCLMN.COLTITLE` after.
 - **See:** `tables-and-dbi.md` § "DBI pitfalls" → "Column title hard cap at 20 characters".
 
+### DBI block parse failure silently skips the entire block — all downstream steps fail with (1013)
+
+**Symptom:** After installing an upgrade shell, you see a cascade of errors:
+```
+Line 2 : parse error AT OR NEAR SYMBOL ,
+Line 1 : parse error AT OR NEAR SYMBOL INSERT
+Error: Missing column TGML_COOHOMSKU in table PART (1013)
+Error: Missing column TGML_SPECPUR in table PART (1013)
+...N more (1013) errors...
+Unrecoverable errors occurred — fix and rerun this upgrade
+```
+
+**Root cause:** When Priority's DBI parser encounters a parse error inside a shell `DBI << \EOF ... EOF` block, it skips the **entire block** — none of the columns in it are added to the table. Every subsequent revision step (TAKEFORMCOL, TAKETRIG, TAKESINGLEENT) that references those missing columns then fails with `(1013) Missing column` because the table columns were never created.
+
+**The (1013) errors are a symptom, not the root cause.** Fix the DBI parse error first; the (1013) errors resolve automatically on re-run once the columns exist.
+
+**Common DBI parse-error triggers inside shell `DBI << \EOF` blocks:**
+- Hebrew column titles byte-rotated due to RTL BIN bug (see next entry)
+- Line exceeding 68 characters (parser truncates mid-token)
+- Missing `FOR TABLE <name>` header before `INSERT` lines
+- Trailing comma on the last column definition before `UNIQUE`
+
+*(seen in: da9b3f57-4ba7-49bd-9985-d6b0b06b7d72; sideways receipt: `SELECT COUNT(DISTINCT UPGRADE) FROM UPGNOTES WHERE UPGTYPE=10 AND UPGRADE IN (SELECT UPGRADE FROM UPGNOTES WHERE UPGTYPE=4)` → 2 additional revisions confirmed)*
+
+### Hebrew titles in UPGNOTESTEXT DBI blocks cause RTL byte-rotation — use ASCII-only in `FOR TABLE … INSERT` lines
+
+**Symptom:** The shell generated from a revision contains malformed DBI like:
+```
+/* BROKEN — Hebrew RTL byte-rotation shifts closing ) to the start of the next line */
+,('שם עמודה בעברית' ,TGML_CSVSUB (CHAR, 60
+```
+This triggers a DBI parse error on the very next line, causing the entire DBI block to be skipped (see previous entry).
+
+**Root cause:** On Priority installations running BIN versions prior to 24.0.37 (with `UPGTITLES=0`), Hebrew column titles stored in `UPGNOTESTEXT.TEXT` get byte-rotated when Priority generates the shell. The visual RTL display order of Hebrew characters causes the closing `)` and comma to shift to the beginning of the next line in the output stream.
+
+**Fix:** Use **ASCII-only titles** in all `FOR TABLE … INSERT` column definitions written to `UPGNOTESTEXT`. Set Hebrew display titles separately via TAKEFORMCOL (not affected by this bug):
+```sql
+/* CORRECT — ASCII title in the DBI block, safe on all BIN versions */
+TGML_CSVSUB  (CHAR, 60, 'CSV Sub-path'),
+TGML_BOMSUB  (CHAR, 60, 'BOM Sub-path'),
+TGML_HISTSUB (CHAR, 60, 'History Sub-path')
+```
+Form-column **display titles** (stored separately in TAKEFORMCOL revision steps) are NOT subject to this constraint and can use full Hebrew.
+
+- **See:** `tables-and-dbi.md` § "DBI Syntax Reference".
+*(seen in: da9b3f57-4ba7-49bd-9985-d6b0b06b7d72; eval-verified: 8b4e1c72-d035-4f9a-a761-2e8c0f3b5d91)*
+
 ## Triggers and SQLI
 
 ### Declaring variables with `:VAR = INTEGER;`
@@ -251,6 +298,31 @@ For UPGNOTESTEXT specifically, see `references/vscode-bridge-examples.md`
 - **Wrong:** Encoding issues during shell generation.
 - **Right:** ASCII titles in the DBI spec; set Hebrew title via a follow-up `TAKEFORMCOL` or `FCLMN.COLTITLE` update.
 - **See:** `deployment.md` § "DBI in UPGNOTES for system-table columns".
+- **Detail:** See "Hebrew titles in UPGNOTESTEXT DBI blocks cause RTL byte-rotation" in the Tables and DBI section above for the mechanism and code example.
+
+### UPGRADES revision serves stale cached shell after content fix — clear PREPARED before re-running TAKEUPGRADE
+
+**Symptom:** You fix a DBI error in `UPGNOTESTEXT`, re-run TAKEUPGRADE and DOWNLOADUPG, but the downloaded shell still contains the old broken content.
+
+**Root cause:** Once a revision row has `PREPARED='Y'`, DOWNLOADUPG serves the cached shell. It does not regenerate until PREPARED is cleared.
+
+The standing rule ("never prepare the same upgrade twice") applies when the shell has already been installed on a target server. When the generated shell is corrupt and has **never been installed**, resetting and re-preparing the same revision is safe.
+
+**Fix:**
+1. Fix the underlying UPGNOTESTEXT content (e.g., rewrite DBI column titles to ASCII-only).
+2. Clear `PREPARED` and reset `TRANSLATED` on the UPGRADES row via WebSDK — use the form path, not a direct SQL `UPDATE`, because the UPGRADES form has save-time trigger logic that direct SQL bypasses:
+   ```json
+   [
+     {"op": "fieldUpdate", "field": "PREPARED", "value": ""},
+     {"op": "fieldUpdate", "field": "TRANSLATED", "value": "N"},
+     {"op": "saveRow"}
+   ]
+   ```
+3. Re-run `TAKEUPGRADE` then `DOWNLOADUPG` on the same revision row.
+
+**Constraint:** If the shell was already partially or fully installed on any target server, create a new revision instead to avoid re-applying already-applied steps.
+
+*(seen in: da9b3f57-4ba7-49bd-9985-d6b0b06b7d72; eval-verified: 1d9e5f83-a247-4c6b-b950-7f4a1b2e8c04)*
 
 ## Reports
 

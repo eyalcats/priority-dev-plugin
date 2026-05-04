@@ -491,6 +491,8 @@ The **Database Interpreter (DBI)** program is a database language for constructi
 **Important — DBI and upgrade change tracking:**
 DBI executed via `run_inline_sqli(mode=dbi)` or standalone `.pq` files bypasses Priority's change tracking system. Columns added this way to system tables will NOT be included automatically in upgrade shells by TAKEUPGRADE. To deploy them, you must manually add a UPGCODE="DBI" entry to the UPGNOTES subform in the UPGRADES form, with the DBI text in its UPGNOTESTEXT subform. See `references/debugging.md` → "Adding Manual DBI to UPGNOTES" for the full pattern. Columns added to custom tables (via TAKESINGLEENT on the form) are handled automatically.
 
+**Pitfalls when writing DBI inside upgrade shells:** A single parse error inside a `DBI << \EOF` block silently skips the *entire* block, causing every downstream TAKEFORMCOL/TAKETRIG step to fail with `(1013) Missing column`. The most common trigger is Hebrew column titles in `UPGNOTESTEXT.TEXT`, which get RTL byte-rotated during shell generation on BIN <24.0.37 — use ASCII-only titles in `FOR TABLE … INSERT` lines. See `references/common-mistakes.md` § "Tables and DBI" for both anti-patterns with full mechanism + code examples.
+
 ### Syntax Conventions
 
 - `[ ]` = optional

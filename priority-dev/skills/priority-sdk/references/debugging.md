@@ -475,7 +475,7 @@ FORMAT;
 - Complete modifications on an entity before linking to TAKESINGLEENT.
 - Do not wait more than a working day; prepare upgrades at end of each day.
 - Order matters: reports before procedures, interfaces before procedures, DBI before TAKEFORMCOL.
-- Never prepare the same upgrade twice; create a new revision instead.
+- Never prepare the same upgrade twice; create a new revision instead. *Exception:* when the generated shell is corrupt and **has not yet been installed on any target**, you can safely reset and re-prepare the same revision — see `references/common-mistakes.md` § "UPGRADES revision serves stale cached shell after content fix" for the WebSDK reset workflow.
 - **TAKESINGLEENT on system forms pulls ALL columns** — use TAKEFORMCOL for specific columns added to system forms to avoid "Missing column" errors on clients with different Priority versions.
 - **Custom columns on system tables** added via manual DBI bypass change tracking — TAKEUPGRADE won't auto-generate DBI for them. Add a manual UPGCODE="DBI" entry to UPGNOTES with UPGNOTESTEXT containing the DBI (no `EXEC` prefix, ASCII titles). See "Adding Manual DBI to UPGNOTES" below.
 
