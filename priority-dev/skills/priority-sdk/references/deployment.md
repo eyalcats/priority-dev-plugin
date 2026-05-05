@@ -171,6 +171,81 @@ blocking subform. Peel in reverse order.
 1 message + 12 columns + 1 form + 1 DBI. Applicable to all 124+ custom forms
 with triggers in this environment.)*
 
+## TAKEFORMCOL precondition — the column must be in FORMCLMNS
+
+`TAKEFORMCOL` reads the column's metadata from `FORMCLMNS` (the underlying table for the FCLMN subform on EFORM). If the column has not been added to the form's column list, TAKEUPGRADE silently fails for that UPGNOTES row with:
+
+```
+בעית לקיחת שנוי N מטיפוס TAKEFORMCOL של עדכון M
+Problem taking change N of type TAKEFORMCOL in update M
+```
+
+**Common trap:** A developer adds a column to a backing table via DBI, then adds a `TAKEFORMCOL` entry in UPGNOTES, but forgets to add the column to the form itself via FCLMN. A column added to the table is NOT automatically visible on the form — it must be separately registered in FORMCLMNS.
+
+**Diagnosis:** Check whether the FCLMN row exists:
+```sql
+SELECT NAME, POS FROM FORMCLMNS
+WHERE FORM = (SELECT EXEC FROM EXEC WHERE ENAME = '<form>' AND TYPE = 'F')
+AND NAME = '<colname>' FORMAT;
+```
+If no rows returned, the column is not on the form. Add it via WebSDK before running TAKEUPGRADE:
+```
+EFORM → filter(ENAME=<form>) → getRows → setActiveRow(1)
+  → startSubForm('FCLMN') → newRow
+  → fieldUpdate('NAME', '<colname>') → fieldUpdate('POS', <pos>) → saveRow
+```
+Only after the FCLMN row exists will TAKEFORMCOL find and package the column definition.
+
+*(seen in: TGML-subproject-A-2026-05-04-large — TGML_PURFAM on PART; sideways: SELECT DISTINCT ENAME FROM UPGNOTES WHERE TYPE = 'F' AND ENAME <> '' → 150+ distinct forms, all subject to this precondition)*
+
+## TAKEMENULINK precondition — the MENU row must exist on the source
+
+`TAKEMENULINK` reads the parent→child link row from the `MENU` table (underlying table for the MENU subform on EMENU). If no row exists yet, TAKEUPGRADE fails with:
+
+```
+בעית לקיחת שנוי N מטיפוס TAKEMENULINK של עדכון M
+Problem taking change N of type TAKEMENULINK in update M
+```
+
+**Diagnosis:** Check whether the link row exists:
+```sql
+SELECT EXEC, EXECRUN, POS FROM MENU
+WHERE EXEC = (SELECT EXEC FROM EXEC WHERE ENAME = '<parent>' AND TYPE = 'M')
+AND EXECRUN = (SELECT EXEC FROM EXEC WHERE ENAME = '<child>') FORMAT;
+```
+
+**Fix:** If missing, add the link via WebSDK before running TAKEUPGRADE:
+```
+EMENU → filter(ENAME=<parent_menu>) → getRows → setActiveRow(1)
+  → startSubForm('MENU') → newRow
+  → fieldUpdate('RUN', '<child_menu>') → fieldUpdate('ETYPE', 'M')
+  → fieldUpdate('POSITION', <pos>) → saveRow
+```
+
+Note: The MENU table has only 3 real columns: `EXEC` (parent), `EXECRUN` (child), `POS`. The ENAME, ETYPE, and TITLE columns visible in the EMENU subform UI are joined display fields from the EXEC table via EXECRUN — do not try to INSERT them directly into MENU.
+
+*(seen in: TGML-subproject-A-2026-05-04-large — SYSMAINTEN_MODULE → TGML_MENU link; sideways: SELECT DISTINCT ENAME FROM UPGNOTES WHERE TYPE = 'M' AND ENAME <> '' → 11 distinct menus)*
+
+## Menu child references must be resolvable at install time
+
+When `TAKESINGLEENT` captures a menu entity, the shell includes all child rows from the `MENU` table (the menu's item list). If a child row's `EXECRUN` points to an entity not included in the same shell (or not already on the target), INSTITLE may fail with a reference error or silently create a broken menu item.
+
+**Common trap:** Dropping a `TAKESINGLEENT` entry for a procedure from revision A while a menu's `TAKESINGLEENT` in the same revision already captured a child row pointing to that procedure. The menu's BRING block includes the child link; the procedure's entity definition does not exist on the target.
+
+**Fix options:**
+1. Keep the procedure in the same revision (add it back).
+2. Delete the child row from the source menu before re-running TAKEUPGRADE, so the captured BRING block does not include the dangling reference.
+3. Ship the menu in revision A without the child link, add the link in revision B (after the procedure is installed).
+
+**Verify before shipping:**
+```sql
+SELECT M.EXEC, M.EXECRUN, E.ENAME FROM MENU M, EXEC E
+WHERE M.EXEC = (SELECT EXEC FROM EXEC WHERE ENAME = '<menu>' AND TYPE = 'M')
+AND M.EXECRUN = E.EXEC FORMAT;
+```
+
+*(seen in: TGML-subproject-A-2026-05-04-large — TGML_MENU POS=50 pointing to TGML_INITSERIES; sideways: SYSMAINTEN_MODULE and 9 other menus with TAKEMENULINK entries subject to this constraint)*
+
 ## Related references
 
 - `debugging.md` § "Revisions and Customizations" — revision lifecycle, Language Dictionaries, INSTITLE behaviour, legacy troubleshooting matrices.

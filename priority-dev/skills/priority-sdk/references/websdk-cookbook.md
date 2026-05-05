@@ -1345,6 +1345,29 @@ Same pattern for forms: delete FORMCLTRIGTEXT, FORMCLTRIG, FORMTRIGTEXT, FTRIG, 
 
 *(seen in: session-2026-05-02-tgml-phase1 — deleteRow on EPROG for TGML_DISPATCH failed with "ערך קיים במסך 'שלבי הפרוצדורה'" until child rows cleared in order)*
 
+### EMENU > MENU subform — underlying 3-column schema
+
+The `MENU` subform under `EMENU` (Menu Generator) stores menu item links. The underlying table has **3 columns only**:
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `EXEC` | INT 13 | EXEC id of the parent menu entity |
+| `EXECRUN` | INT 13 | EXEC id of the child entity (menu/form/proc) |
+| `POS` | INT 8 | Display position (ordering within parent) |
+
+The `RUN` (entity name), `ETYPE` (entity type: M/F/P/R), and `TITLE` columns visible in the EMENU subform UI are **joined display fields** from the `EXEC` table via `EXECRUN` — they are not stored in `MENU` directly.
+
+**WebSDK write:** Use `fieldUpdate('RUN', '<ENAME>')` and `fieldUpdate('ETYPE', 'M')` — the bridge resolves these to `EXECRUN` via the join. Do NOT try to `fieldUpdate('EXECRUN', <id>)` directly.
+
+**Direct SQL read:** To verify a menu link exists:
+```sql
+SELECT EXEC, EXECRUN, POS FROM MENU
+WHERE EXEC = (SELECT EXEC FROM EXEC WHERE ENAME = '<parent>' AND TYPE = 'M')
+AND EXECRUN = (SELECT EXEC FROM EXEC WHERE ENAME = '<child>') FORMAT;
+```
+
+*(seen in: TGML-subproject-A-2026-05-04-large — SYSMAINTEN_MODULE → TGML_MENU link verification; sideways: EMENU covers 500+ distinct menu entities in this environment)*
+
 ### PROGMENU must be cleared before deleting a procedure with direct activations (step 0)
 
 If the procedure is registered as a direct activation from any form or menu, EPROG's **PROGMENU** subform holds a row pointing to that linkage. Attempting to delete the EPROG parent while PROGMENU rows exist raises:

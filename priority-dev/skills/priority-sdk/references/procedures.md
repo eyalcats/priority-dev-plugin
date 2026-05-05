@@ -891,3 +891,58 @@ Finished Dashboard procedures can be surfaced in Microsoft Outlook:
 **CRM Dashboards:** Set the **Application** column in the Procedure Generator to `CRM` (this is separate from the Rep/Wizard/Dashboard column value). CRM Dashboards appear under **Priority CRM** in the Outlook Shortcuts pane.
 
 *(seen in: handbook:Dashboards@page-258)*
+
+---
+
+## WebSDK procedure-authoring patterns
+
+### PROGMSG subform — adding procedure messages via WebSDK
+
+Procedure messages (displayed by `MESSAGE`, `WRNMSG`, `PRINTERR` step commands) are stored in the `PROGMSG` subform under `EPROG`.
+
+**Correct subform name:** `PROGMSG` — NOT `ERRMSGS`, `PROGERR`, or `PROGMSGS` (all return "Can't find Sub Form").
+
+WebSDK recipe to add a procedure message:
+```json
+{"op": "filter", "field": "ENAME", "value": "<PROCNAME>"},
+{"op": "getRows"},
+{"op": "setActiveRow", "row": 1},
+{"op": "startSubForm", "name": "PROGMSG"},
+{"op": "newRow"},
+{"op": "fieldUpdate", "field": "NUM", "value": <number>},
+{"op": "fieldUpdate", "field": "TEXT", "value": "<message text>"},
+{"op": "saveRow", "queuingRequired": 0}
+```
+
+Message numbers for custom procedures must be > 500 (same rule as form messages). PRINTERR / MESSAGE / WRNMSG step commands reference messages by their NUM value.
+
+*(seen in: TGML-subproject-A-2026-05-04-large — TGML_INITSEED PROGMSG NUM=10; sideways: PROGMSG subform confirmed via EPROG subform map in websdk-cookbook.md)*
+
+### PROGRAMS table — step registration schema
+
+The `PROGRAMS` table (WebSDK subform: `PROG` under `EPROG`) registers each step in a procedure. Real table columns:
+
+| Column | Type | Meaning |
+|--------|------|---------|
+| `PROG` | INT 8 | Auto-assigned step id (used as key in PROGRAMSTEXT) |
+| `EXEC` | INT 13 | EXEC id of the **parent procedure** (not the step) |
+| `EXECRUN` | INT 13 | EXEC id of the **step command** entity (e.g., PRINT, SQLI step) |
+| `POS` | INT 8 | Step position / execution order |
+
+The `ENAME` and `ETYPE` columns visible in the PROG subform UI are **joined display fields** from the `EXEC` table via `EXECRUN` — they are not stored in `PROGRAMS`.
+
+**WebSDK write:** Use `fieldUpdate('ENAME', '<command_name>')` and `fieldUpdate('ETYPE', 'B')` — the bridge resolves these to `EXECRUN`.
+
+**Direct SQL insert** (when WebSDK is blocked by `EDES='PRC'`):
+```sql
+INSERT INTO PROGRAMS (EXEC, EXECRUN, POS)
+VALUES (<parent_proc_exec_id>, <command_exec_id>, <pos>);
+```
+`PROG` is auto-assigned by the autounique key.
+
+To look up the EXECRUN id for a built-in command (e.g., PRINT):
+```sql
+SELECT EXEC FROM EXEC WHERE ENAME = 'PRINT' AND TYPE = 'P' FORMAT;
+```
+
+*(seen in: TGML-subproject-A-2026-05-04-large — PROGRAMS insert for TGML_INITSEED PRINT step; sideways: SELECT DISTINCT ENAME FROM EXEC WHERE TYPE = 'P' → hundreds of procedures with PROGRAMS rows)*

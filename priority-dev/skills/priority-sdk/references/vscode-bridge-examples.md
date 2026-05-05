@@ -409,3 +409,70 @@ See `deployment.md` for the full upgrade-shell workflow (UPGCODE choice, UPGNOTE
 
 - **Download files** come as UTF-16LE from Priority. The `downloadFile` operation handles conversion and saves as `.sh`.
 - **`generate_shell` MCP tool** auto-adds the `TAKEDIRECTACT` → `TAKESINGLEENT` companion pair, handles `TRANSLATED='N'`, and computes `UPGNUM = MAX+1`. Prefer it over manual UPGNOTES construction.
+
+### write_to_editor caveats
+
+#### Backslash double-escaping on round-trip
+
+Each round-trip through `write_to_editor` adds a layer of backslash escaping to the content stored in `PROGRAMSTEXT`. A SQLI body containing `'\'` (a single backslash) is stored as `'\\'` after one write, `'\\\\'` after two writes, etc.
+
+This silently breaks any clause that relies on a literal backslash — most commonly `LIKE` patterns with an `ESCAPE` clause:
+
+```sql
+/* BREAKS after one write_to_editor round-trip: */
+WHERE NAME LIKE 'TGML\_%' ESCAPE '\';
+/* stored as: WHERE NAME LIKE 'TGML\\_%' ESCAPE '\\'; */
+/* then:      WHERE NAME LIKE 'TGML\\\\_%' ESCAPE '\\\\'; */
+```
+
+The failure mode is invisible: `write_to_editor` reports success, VSCode renders the escape-decoded form (appears correct), but the actual `PROGRAMSTEXT.TEXT` bytes are wrong. Compile then fails with "Unclosed string" on the affected line.
+
+Workarounds (in preference order):
+
+```sql
+/* (1) Drop ESCAPE if the data permits — most common solution */
+WHERE NAME LIKE 'TGML_%';
+
+/* (2) Use a non-backslash escape character */
+WHERE NAME LIKE 'TGML#_%' ESCAPE '#';
+
+/* (3) Use direct SQL UPDATE on PROGRAMSTEXT — only when the editor
+       file is NOT open in VSCode anywhere */
+UPDATE PROGRAMSTEXT SET TEXT = 'WHERE NAME LIKE ''TGML\_%'' ESCAPE ''\'''
+  WHERE PROG = <step_prog> AND TEXTLINE = <line>;
+```
+
+Option 3 is a last resort — direct SQL is overridden by the editor buffer push on the next VSCode compile (see § "Direct SQL on PROGRAMSTEXT is overridden by the editor buffer" below, or `websdk-cookbook.md` § "Use `write_to_editor` (OData) for body text").
+
+*(seen in: TGML-UPGNUM2-debug-session-2026-05-04 — TGML_INITSEED LIKE/ESCAPE clause)*
+
+---
+
+### Direct SQL on PROGRAMSTEXT is overridden by the editor buffer
+
+**When a procedure step `.pq` file is open in VSCode**, the bridge pushes the editor buffer to `PROGRAMSTEXT` before every compile. This means:
+
+- Direct SQL `UPDATE`/`INSERT`/`DELETE` on `PROGRAMSTEXT.TEXT` succeeds server-side (returns "Execution ok"), but the **next compile from VSCode reverts every change** back to the local buffer state.
+- WebSDK PROGTEXT subform writes (`startSubForm('PROGTEXT')` → `newRow` → `fieldUpdate('TEXT', ...)` → `saveRow`) have the same flaw — the editor buffer is the source of truth when its session is active.
+- The failure is invisible: agents report "fix applied + clean compile via WebSDK"; the user compiles from VSCode and sees the original error reappear. The loop repeats until `write_to_editor` is used.
+
+**Canonical fix:** Use `write_to_editor` for any procedure step body change. It updates the editor buffer AND `PROGRAMSTEXT` atomically:
+
+```js
+write_to_editor({
+  entityType: "PROC",
+  entityName: "<PROCNAME>",
+  stepName: "<POS>_SQLI",   /* e.g. "5_SQLI", "10_SQLI" */
+  content: "<full body, all lines, newline-separated>"
+})
+```
+
+`content` must be the **complete** step body — partial-line updates are not supported. Read the current body first via `get_current_file` or by querying `PROGRAMSTEXT WHERE PROG=<step_id>`, then send the full modified version.
+
+**When direct SQL on PROGRAMSTEXT is acceptable:**
+- The procedure file is NOT open in VSCode anywhere.
+- You verify by querying `PROGRAMSTEXT` immediately after and confirming the change persists across a recompile.
+
+**Note:** `websdk-cookbook.md` § "Use `write_to_editor` (OData) for body text" covers the related parser-cache staleness issue (direct SQL succeeds but WebSDK compile returns stale errors). That is a separate failure mode from this one — buffer-push override occurs specifically when the file IS open in VSCode, whereas cache staleness can occur even when the file is not open.
+
+*(seen in: TGML-UPGNUM2-debug-session-2026-05-04 — TGML_INITSEED multiple direct-SQL fixes silently reverted by editor session)*

@@ -198,6 +198,61 @@ Form-column **display titles** (stored separately in TAKEFORMCOL revision steps)
 
 ## Triggers and SQLI
 
+### `EDES='PRC'` on a custom procedure suppresses runtime PRINT/MESSAGE dialogs and blocks EPROG edits
+
+- **Symptom 1 (dialog):** A custom procedure has correctly-structured PRINT / MESSAGE / WRNMSG steps (correct parameter shapes — FILE, ASCII, ADDTO, etc.) but its end-of-run dialog never appears when invoked from Procedure Generator, regardless of param permutation or step type. Swapping CHAR/TITLE to FILE/ASCII or adding INPUT steps makes no difference.
+- **Symptom 2 (EPROG edit):** `websdk_form_action` `saveRow` on EPROG for the procedure appears to succeed, but the change is silently reverted. The form surfaces a guard message "You cannot revise a standard procedure."
+- **Root cause:** `EXEC.EDES = 'PRC'` marks an entity as a Priority core / system-protected procedure. Two runtime effects follow:
+  1. The procedure generator's dialog renderer is gated on EDES — `PRC` suppresses all PRINT/MESSAGE/WRNMSG dialogs at runtime.
+  2. EPROG form-level guards reject edits on `PRC`-classified procedures (same guard as system procs).
+- **How it happens:** An agent or early build script creates a custom procedure by mirroring a system proc's structure, including its `EDES`. The mistake is invisible — the proc compiles, runs, and returns "Execution ok", but the dialog never shows.
+- **Wrong:** Iterating on parameter shapes (CHAR+TITLE, FILE+ASCII, FILE+ASCII+ADDTO), step types (PRINT, PRINTF, MESSAGE, MESSAGEF), or adding/removing INPUT steps to fix missing dialogs.
+- **Right:** Check `EXEC.EDES` first. Custom procedures must use `EDES='LOG'` (list/interactive). Fix an existing proc via direct SQL:
+  ```sql
+  UPDATE EXEC SET EDES = 'LOG' WHERE ENAME = '<PROCNAME>';
+  ```
+  Direct SQL on `EXEC.EDES` works — the SQLI engine permits it despite EPROG form-level guards. Verify:
+  ```sql
+  SELECT ENAME, EDES FROM EXEC WHERE ENAME = '<PROCNAME>' AND TYPE = 'P' FORMAT;
+  ```
+  Then re-run the procedure — the dialog renders immediately without recompile.
+- **Correct EDES values for custom procedures:**
+
+  | EDES | Use for |
+  |------|---------|
+  | `LOG` | Custom interactive procedures — always use this |
+  | `MAN` | Single-record master-style procedures — if applicable |
+  | `PRC` | System-protected core procedures — NEVER use for custom dev |
+
+- **See:** `procedures.md` § "Procedure Attributes". *(seen in: TGML-UPGNUM2-debug-session-2026-05-04, learnings-2026-04-29 — TGML_INITSEED, TGML_MYPROC)*
+
+---
+
+### Apostrophes inside `/* */` block comments cause `Unclosed string` parse errors
+
+- **Symptom:** A SQLI body that compiles cleanly when comments are absent suddenly produces a two-line error after adding a block comment with a contraction or possessive:
+  ```
+  line N: Unclosed string
+  line N+1: parse error at or near symbol SELECT (or UPDATE, WHERE, …)
+  ```
+  The offending `'` is inside a comment, which the developer assumes is ignored by the parser. No actual string literal is unclosed in the SQL code.
+- **Root cause:** Priority's SQLI tokenizer scans for single-quote characters (`'`) BEFORE stripping block comments. An apostrophe inside `/* ... */` — from contractions like `don't`, `it's`, `won't`, `can't`, or any possessive — opens a string literal. Everything until the next genuine `'...'` in the surrounding SQL is consumed as string content. The subsequent SQL keyword then appears in a broken parse context.
+  Example:
+  ```sql
+  /* INSERT adds rows that don't yet exist.   */   -- apostrophe opens a string here
+  UPDATE foo SET bar = 'baz' WHERE ...;            -- 'baz' closes it; 'WHERE' is now a broken token
+  ```
+- **Wrong:** Hunting for an unclosed string literal in the SQL statements; suspecting the string after the comment.
+- **Right:** Remove all apostrophes from block comments. Write comments without contractions:
+  ```sql
+  /* INSERT adds rows that do not yet exist. */
+  ```
+  Also affected with `--` single-line comments if the comment text contains an unbalanced `'`. Rule of thumb: write all Priority SQLI comments without any apostrophes.
+- **Full list of contractions that break SQLI parsing:** `don't`, `doesn't`, `didn't`, `won't`, `can't`, `couldn't`, `wouldn't`, `shouldn't`, `it's`, `that's`, `what's`, `who's`, `you're`, `we're`, `they're`, `I'm`, `I've`, `I'd`, and any other construction containing a single quote.
+- **See:** `sql-core.md` § "Comments". *(seen in: TGML-UPGNUM2-debug-session-2026-05-04 — TGML_INITSEED SQLI body; 2482 distinct procedure steps in PROGRAMSTEXT contain block comments on this install)*
+
+---
+
 ### Declaring variables with `:VAR = INTEGER;`
 - **Wrong:** Not valid SQLI syntax.
 - **Right:** `SELECT <expr> INTO :VAR FROM DUMMY;` implicitly declares.
@@ -280,6 +335,19 @@ For UPGNOTESTEXT specifically, see `references/vscode-bridge-examples.md`
   | Any Hebrew string constant | Define in Procedure Messages / Form Messages; reference by number |
   Note: the `:HEBREWFILTER` variable controls display ordering only — it does NOT fix source-code storage reversal.
 - **See:** `sql-core.md` § "String Functions". *(seen in: session-2026-05-02-tgml-phase1)*
+
+### `PRINTERR`, `PRINT`, `PRINTF`, `MESSAGE`, `MESSAGEF` written inside a SQLI step body
+
+- **Symptom:** A SQLI step body ends with `PRINTERR 10;` or `PRINT :FILE;` to show a dialog or report an error. The procedure compiles with:
+  ```
+  parse error at or near symbol PRINTERR :5
+  ```
+  (or `PRINT`, `PRINTF`, `MESSAGE`, `MESSAGEF` — whichever keyword appears in the body.)
+- **Root cause:** `PRINTERR`, `PRINT`, `PRINTF`, `MESSAGE`, `MESSAGEF`, `WRNMSG`, `WRNMSGF`, `CONTINUE`, `CONTINUEF`, `CHOOSE`, `CHOOSEF`, `INPUT`, `INPUTF` are all procedure **step TYPE commands** — rows in `PROGRAMS` with a given `ETYPE`. They are not SQLI keywords and cannot appear inside a SQLI step body (`PROGRAMSTEXT`). The SQLI parser rejects them.
+- **Wrong:** Adding `PRINTERR 10;` or `PRINT :FILE;` as the last line of a SQLI step (TYPE=`SQLI`) body.
+- **Right:** Create a separate procedure step of the required type. The SQLI step writes its output to a temp file or sets a variable; the downstream step (e.g., `PRINT`) reads that file or uses the variable. In WebSDK, add a new row on the `PROGRAMS` subform with `ETYPE = 'PRINT'` (or whichever type), then set its `PAR` field.
+- **See:** `procedures.md` § "Basic Commands" table and § "PROGRAMS table — step registration schema".
+*(seen in: TGML-subproject-A-2026-05-04-large — TGML_INITSEED debug)*
 
 ## Deployment
 
