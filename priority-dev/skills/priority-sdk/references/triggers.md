@@ -1197,4 +1197,26 @@ If two or more forms share the same base table (e.g., `CUSTNOTES` and `CUSTNOTES
 
 Without this column, the BPM mail mechanism cannot identify the correct form when multiple forms share the same underlying table.
 
+---
+
+## Trigger Deletion — Always Delete Both Metadata and Body Tables
+
+**Always delete from both the metadata row table AND the body-text table.** The trigger declaration lives in `FORMTRIG` (form-level) or `FORMCLTRIG` (column-level); the body lines live in `FORMTRIGTEXT` or `FORMCLTRIGTEXT` respectively. Deleting only the metadata row leaves orphan body rows that the form compiler still parses, producing `"Unresolved identifier"` errors on any column referenced in the orphan body.
+
+```sql
+-- Form-level trigger deletion (e.g., POST-INSERT, POST-UPDATE, PRE-DELETE):
+DELETE FROM FORMTRIG     WHERE FORM = :FORMID AND TRIG = :TRIGID;
+DELETE FROM FORMTRIGTEXT WHERE FORM = :FORMID AND TRIG = :TRIGID;
+
+-- Column-level trigger deletion (e.g., CHOOSE-FIELD, POST-FIELD on a column):
+DELETE FROM FORMCLTRIG     WHERE FORM = :FORMID AND NAME = :COL AND TRIG = :TRIGID;
+DELETE FROM FORMCLTRIGTEXT WHERE FORM = :FORMID AND NAME = :COL AND TRIG = :TRIGID;
+```
+
+**Preferred path:** use WebSDK `EFORM > FTRIG > deleteRow` (form-level) or `EFORM > FCLMN > FORMCLTRIG > deleteRow` (column-level) — those cascade to the text table automatically. Direct SQLI DELETE is for cleanup of orphan state only (e.g., after a partial WebSDK delete left the body rows behind).
+
+**Symptom of missing the body delete:** subsequent compile fails with `"<FORM>/<COL>/<TRIG>, line N: <col-name> Unresolved identifier"` even after the trigger declaration no longer appears in the metadata. Running `SELECT COUNT(*) FROM FORMTRIGTEXT WHERE FORM=<ID> AND TRIG=<TRIGID>;` will confirm orphan rows remain.
+
+*(seen in: tgml-phase2-cartesian-debug-2026-05-06)*
+
 *(seen in: handbook:Form Triggers@page-265)*

@@ -599,3 +599,24 @@ The standing rule ("never prepare the same upgrade twice") applies when the shel
   | Interface   | `EINTER` |
   Verify at any time with `SELECT ENAME, TITLE FROM EXEC WHERE TYPE = 'F' AND TITLE LIKE '%מחולל%' FORMAT;`.
 - **See:** `websdk-cookbook.md` § "Canonical generator-form names".
+
+---
+
+## DBI Multi-Statement INSERT Blocks Fail with Parse Error
+
+- **Symptom:** Running multiple `INSERT` statements in a single `FOR TABLE` block produces `"Line 2 : parse error AT OR NEAR SYMBOL INSERT"`:
+  ```sql
+  FOR TABLE ORDERITEMS
+    INSERT TGML_A (CHAR, 36, 'A');
+    INSERT TGML_B (CHAR, 36, 'B');
+  ```
+- **Wrong:** Assuming DBI's semicolon-separation allows multi-column INSERT in one `FOR TABLE` block.
+- **Right:** Each column add must be its own complete `FOR TABLE` statement:
+  ```sql
+  FOR TABLE ORDERITEMS INSERT TGML_A (CHAR, 36, 'A');
+  FOR TABLE ORDERITEMS INSERT TGML_B (CHAR, 36, 'B');
+  ```
+- **Note:** Multi-statement DELETE blocks within one `FOR TABLE` do work — the limitation is INSERT-specific. Verified 2026-05-06 on lp1378.
+- **See:** `tables-and-dbi.md` for the full DBI syntax reference.
+
+*(seen in: tgml-phase2-cartesian-debug-2026-05-06)*

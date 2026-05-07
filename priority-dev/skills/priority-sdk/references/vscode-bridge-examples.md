@@ -476,3 +476,20 @@ write_to_editor({
 **Note:** `websdk-cookbook.md` § "Use `write_to_editor` (OData) for body text" covers the related parser-cache staleness issue (direct SQL succeeds but WebSDK compile returns stale errors). That is a separate failure mode from this one — buffer-push override occurs specifically when the file IS open in VSCode, whereas cache staleness can occur even when the file is not open.
 
 *(seen in: TGML-UPGNUM2-debug-session-2026-05-04 — TGML_INITSEED multiple direct-SQL fixes silently reverted by editor session)*
+
+---
+
+## Common Mistakes
+
+### NEVER use `write_to_editor` as a read probe
+
+`write_to_editor` is a **write-only tool**. Calling it with any content — including a placeholder like `" "` or `""` — silently overwrites the entity body via OData PATCH and reports success (`charCount=1, writtenVia=odata`). The original content cannot be recovered from the server (no transaction rollback via these tools).
+
+**Wrong:** Calling `write_to_editor(entityType="FORM", entityName="X", stepName="SOF_SCAN", content=" ")` to "test if the entity is accessible". This destroys the trigger body.
+
+**Right:** To inspect entity contents without touching them, use one of:
+- `get_current_file` — reads the active VSCode editor buffer (entity must be open in VSCode first)
+- `run_inline_sqli(sql="SELECT TEXT FROM FORMTRIGTEXT WHERE FORM=... FORMAT;")` — direct body text query
+- `run_windbi_command("priority.dumpForm", entityName="<FORM>")` — full form dump
+
+*(seen in: tgml-phase2-cartesian-debug-2026-05-06 — SOF_SCAN trigger body destroyed during debugging)*

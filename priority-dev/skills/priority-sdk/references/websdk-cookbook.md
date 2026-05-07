@@ -160,6 +160,7 @@ FORMPREPERRS exists and can be read via WebSDK. Each compile **overwrites/refill
 | `fieldUpdate(JTNAME, "USERSLOGIN")` | `ערך 'USERSLOGIN' לא קיים בעמודה 'טבלת חיתוך'` | Not every plausible table name is a valid JTNAME on every server. Use `EFORM filter(TITLE, "user%", LIKE)` to discover real names, or skip the join and stamp the column from `SQL.USER` in a trigger |
 | `fieldUpdate(SUM, "U")` | `Can't find column: SUM` | `SUM` is a FCLMN metadata field not exposed via WebSDK. For autounique, use a PRE-INSERT trigger: `SELECT NVL(MAX(KLINE),0)+1 INTO :$.KLINE FROM <table>;` |
 | `fieldUpdate` on a `HIDEBOOL=Y` column | `"Can't find column: <COLNAME>"` | The form engine hides the column from the WebSDK surface — `fieldUpdate` cannot reference it. Do not call `fieldUpdate` on hidden columns. A `newRow + saveRow` chain that does NOT reference the hidden column succeeds (table default or PRE-INSERT trigger supplies the value). See note below. |
+| WebSDK `newRow` on FCLMN lands row on FORM=9061 instead of target (system forms) | Form opens in web client but each row appears N×ALL-rows times (Cartesian self-join via rogue cross-form FCLMN row). `FORMPREPERRS` is empty — compile passes clean. | After every `newRow + saveRow` on a system form's FCLMN, run: `SELECT FORM FROM FORMCLMNS WHERE NAME='<col>' FORMAT;`. If FORM=9061 (or any wrong ID): delete the rogue row and re-add via Priority UI Form Generator "Add Column" Action. Never retry with another `newRow`. See §When to Use UI vs WebSDK for System Forms. *(seen in: tgml-phase2-cartesian-debug-2026-05-06)* |
 
 **HIDEBOOL=Y + NOT-NULL = singleton enforcement at the form layer:**
 Setting `HIDEBOOL='Y'` on a NOT-NULL column with no WebSDK-accessible default
@@ -1393,3 +1394,101 @@ If the procedure is registered as a direct activation from any form or menu, EPR
 Check for PROGMENU rows before attempting deletion of any procedure that may have been activated from a form or menu — this is step 0, not an afterthought.
 
 *(seen in: session-2026-05-02-tgml-phase1 — TGML_DISPATCH had a PROGMENU entry from TGML_PRODSERIES; deleteRow failed until PROGMENU cleared)*
+
+---
+
+## When to Use UI vs WebSDK for System Forms
+
+For **custom forms** (forms you create, e.g., `TGML_*`, `SOF_*`), WebSDK `EFORM > <form> > FCLMN > newRow` is the recommended path — fast, scriptable, and the form's metadata is not cross-bound to other system entities.
+
+For **system forms** (ORDERITEMS, PART, ORDERS, PORDERITEMS, etc.) — heavily joined and tightly coupled to many other entities — **prefer the Priority UI Form Generator's "Add Column" Action** over WebSDK FCLMN newRow.
+
+WebSDK `newRow` on a system form's FCLMN sub-form can land the row on a generic catch-all form (FORM=9061, ENAME='F', TABLE=1550) instead of the named target. These rogue rows cross-contaminate the system form's compiled cursor at runtime, producing record-duplication thousands of times (Cartesian join). Compile passes clean; `FORMPREPERRS` stays empty.
+
+**Symptom:** form opens in web client but each row appears N×M times where N×M ≈ row-count of the affected system table × row-count of some 2-row table.
+
+**Detection — after every WebSDK newRow on a system form's FCLMN:**
+```sql
+SELECT FORM FROM FORMCLMNS WHERE NAME = '<col>' FORMAT;
+```
+If FORM != the intended form EXEC ID, the row landed on the wrong form.
+
+**Remediation:**
+1. `DELETE FROM FORMCLMNS WHERE NAME = '<col>' AND FORM = 9061;`
+2. Re-add the column via Priority UI Form Generator "Add Column" Action.
+3. NEVER paper over with another `newRow` — rogue rows accumulate and compound the Cartesian.
+
+**Agent guidance:** builder agents adding columns to system forms should verify the FORM ID after every `newRow + saveRow`. If wrong: delete the rogue row, surface the issue to the human controller for UI re-add, and abort further FCLMN additions on that form in the same dispatch.
+
+*(seen in: tgml-phase2-cartesian-debug-2026-05-06)*
+
+---
+
+## Metadata Editing Rules — Never Direct-UPDATE Form Column Tables
+
+Form-column metadata is spread across at least three tables: `FORMCLMNS` (the primary FCLMN row), `FORMCLMNSA` (expression body), and `ADDFORMCOLUMN` (system-form column-add staging). Editing any one of them via direct `UPDATE` or `DELETE` risks leaving the other two in inconsistent state. The form compiler reads from all three; partial edits can produce orphans that compile clean but misbehave at runtime.
+
+**Three confirmed failure modes from tgml-phase2 debug (2026-05-06):**
+
+1. `UPDATE FORMCLMNS SET EXPRESSION='' WHERE NAME='TGML_CNT_TOT'` — cleared the calc flag but left the `FORMCLMNSA` expression body row in place; compiler entered confused state.
+2. `UPDATE ADDFORMCOLUMN SET CNAME='' WHERE NAME='TGML_SERIES'` — cleared the form-level FK binding but `FORMCLMNS` retained JOIN/IDJOIN values; mixed state visible to one compile layer but not the other.
+3. `UPDATE FORMCLMNS SET JOIN=0, IDJOIN=0 WHERE NAME='TGML_SERIES'` — zeroed join order but the `ADDFORMCOLUMN` pattern remained matched against `FORMCLMNS`; some queries treated the col as still FK-joined.
+
+**Always go through one of these consistent paths:**
+1. WebSDK `EFORM > <form> > FCLMN > <col> > [fieldUpdate | deleteRow | startSubForm FCLMNSA > ...]`
+2. Priority UI Form Generator → Form Columns → edit via the proper screens.
+
+Direct SQLI `UPDATE`/`DELETE` on `FORMCLMNS`, `FORMCLMNSA`, or `ADDFORMCOLUMN` is reserved only for emergency cleanup of confirmed orphan rows (rows with no live entity owner) — and even then, check and clean all three tables in one block.
+
+*(seen in: tgml-phase2-cartesian-debug-2026-05-06)*
+
+---
+
+## Creating a Sub-Form Safely — Verified Step Sequence
+
+Avoid building sub-forms via WebSDK chains that pass through EFORM navigation to a system form — those chains are vulnerable to the FORM=9061 landing-zone bug (see §When to Use UI vs WebSDK for System Forms). One tgml-phase2 session spent 64 minutes / 368 tool calls recovering from a sub-form created with FCLMN rows on the wrong parent (FATFORM=9061 instead of ORDERITEMS).
+
+**Recommended sequence (verified 2026-05-06):**
+
+1. **Create the table first via DBI** (independent of any form):
+   ```sql
+   CREATE TABLE TGML_ORDSTATIONS
+     KLINE   (INT, 6, 'PK'),
+     ORDI    (INT, 6, 'Order Line'),
+     ...
+   UNIQUE (KLINE);
+   ```
+
+2. **Verify the table exists** before any form work:
+   ```
+   displayTableColumns TGML_ORDSTATIONS
+   ```
+
+3. **Create the EFORM row directly** (not via system-form navigation):
+   ```json
+   {"form": "EFORM", "operations": [
+     {"op": "newRow"},
+     {"op": "fieldUpdate", "field": "ENAME",      "value": "TGML_ORDSTATIONS"},
+     {"op": "fieldUpdate", "field": "TNAME",      "value": "TGML_ORDSTATIONS"},
+     {"op": "fieldUpdate", "field": "EDES",       "value": "LOG"},
+     {"op": "fieldUpdate", "field": "MODULENAME", "value": "פיתוח פרטי"},
+     {"op": "saveRow"}
+   ]}
+   ```
+
+4. **Verify the form's EXEC ID** before adding any columns:
+   ```sql
+   SELECT EXEC FROM EXEC WHERE ENAME='TGML_ORDSTATIONS' AND TYPE='F' FORMAT;
+   ```
+
+5. **Add FCLMN rows** — and verify each row's FORM after `newRow + saveRow`:
+   ```sql
+   SELECT FORM FROM FORMCLMNS WHERE NAME='<col>' FORMAT;
+   -- If FORM != <new-EXEC-ID>, abort and clean up before continuing
+   ```
+
+6. **Add FORMLINK to attach as sub-form** — only after all FCLMN rows are verified correct.
+
+Skipping any verification step risks leaving the sub-form in a half-state (wrong parent, wrong EXEC) that is expensive to recover.
+
+*(seen in: tgml-phase2-cartesian-debug-2026-05-06)*
